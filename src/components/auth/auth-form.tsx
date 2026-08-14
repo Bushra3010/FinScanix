@@ -1,0 +1,168 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Info, LoaderCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FieldHint, Input, Label, Select } from "@/components/ui/field";
+import { CITIES } from "@/lib/data/reference";
+import { TIERS } from "@/lib/data/org";
+import type { TierId } from "@/lib/types";
+
+/**
+ * Prototype auth. No credentials are validated, transmitted or stored — the
+ * form exists to demonstrate the flow and the field set. Real auth replaces the
+ * submit handler with a server action.
+ */
+export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: TierId }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setTimeout(() => router.push("/app/dashboard"), 550);
+  }
+
+  const isRegister = mode === "register";
+
+  return (
+    <div>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        {isRegister ? "Create your account" : "Sign in to FinScanix"}
+      </h1>
+      <p className="mt-1.5 text-[13.5px] text-muted-foreground">
+        {isRegister
+          ? "14-day trial of the full pipeline. No card required."
+          : "Verify vendor rates against SoR and live market pricing."}
+      </p>
+
+      <div className="mt-5 flex gap-2.5 rounded-lg border border-border bg-brand-soft/50 px-3.5 py-3">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+        <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">Prototype build.</span> Nothing you
+          type here is checked, sent or stored — use placeholder details and press{" "}
+          {isRegister ? "Create account" : "Sign in"} to enter the app.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        {isRegister && (
+          <>
+            <div>
+              <Label htmlFor="name">Full name</Label>
+              <Input id="name" name="name" autoComplete="off" placeholder="Your name" required />
+            </div>
+            <div>
+              <Label htmlFor="org">Organisation</Label>
+              <Input id="org" name="org" autoComplete="off" placeholder="Company name" required />
+            </div>
+          </>
+        )}
+
+        <div>
+          <Label htmlFor="email">Work email</Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="off"
+            placeholder="name@company.in"
+            required
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            {!isRegister && (
+              <Link href="/login" className="mb-1.5 text-[12.5px] text-brand hover:underline">
+                Forgot password?
+              </Link>
+            )}
+          </div>
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            placeholder="••••••••••"
+            required
+          />
+          {isRegister && (
+            <FieldHint>
+              Minimum 12 characters with a number and a symbol. Checked against known breached
+              passwords.
+            </FieldHint>
+          )}
+        </div>
+
+        {isRegister && (
+          <>
+            <div>
+              <Label htmlFor="city">Primary project city</Label>
+              <Select id="city" name="city" defaultValue="noida">
+                {CITIES.map((city) => (
+                  <option key={city.id} value={city.id}>
+                    {city.name}, {city.state} · index {city.indexFactor.toFixed(2)}
+                  </option>
+                ))}
+              </Select>
+              <FieldHint>Sets the default cost index for rate adjustment. Changeable per project.</FieldHint>
+            </div>
+
+            <div>
+              <Label htmlFor="plan">Plan</Label>
+              <Select id="plan" name="plan" defaultValue={plan ?? "professional"}>
+                {TIERS.map((tier) => (
+                  <option key={tier.id} value={tier.id}>
+                    {tier.name}
+                    {tier.documentQuota ? ` · ${tier.documentQuota} docs/month` : " · unlimited"}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <label className="flex cursor-pointer items-start gap-2.5 text-[12.5px] leading-relaxed text-muted-foreground">
+              <input
+                type="checkbox"
+                required
+                className="mt-0.5 h-4 w-4 cursor-pointer rounded border-border-strong accent-[var(--brand)]"
+              />
+              <span>
+                I agree to the terms of service and confirm I am authorised to upload my
+                organisation&apos;s vendor documents.
+              </span>
+            </label>
+          </>
+        )}
+
+        {!isRegister && (
+          <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 cursor-pointer rounded border-border-strong accent-[var(--brand)]"
+            />
+            Keep me signed in on this device
+          </label>
+        )}
+
+        <Button type="submit" size="lg" className="w-full" disabled={pending}>
+          {pending && <LoaderCircle className="h-4 w-4 animate-spin" />}
+          {isRegister ? "Create account" : "Sign in"}
+        </Button>
+      </form>
+
+      <p className="mt-6 text-center text-[13px] text-muted-foreground">
+        {isRegister ? "Already have an account? " : "New to FinScanix? "}
+        <Link
+          href={isRegister ? "/login" : "/register"}
+          className="font-medium text-brand hover:underline"
+        >
+          {isRegister ? "Sign in" : "Create an account"}
+        </Link>
+      </p>
+    </div>
+  );
+}
