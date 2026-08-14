@@ -20,7 +20,14 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Runtime traffic goes through Supabase's transaction pooler (port 6543).
+  // Supabase's direct endpoint resolves to IPv6 only, and most hosts —
+  // Railway included — have IPv4-only egress, so the pooler is not optional
+  // there. Append ?pgbouncer=true&connection_limit=1 to this URL.
+  url       = env("DATABASE_URL")
+  // Migrations need a session connection: the transaction pooler cannot hold
+  // the advisory locks or run the DDL that Prisma Migrate depends on.
+  directUrl = env("DIRECT_URL")
 }
 
 /// A tenant. Every business record hangs off exactly one of these.
