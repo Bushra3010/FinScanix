@@ -1,0 +1,306 @@
+// FinScanix data model.
+//
+// Mirrors the domain contract in src/lib/types.ts — the query layer maps rows
+// back to those types so the variance engine and every component stay unchanged.
+//
+// Portability: enum-like columns are plain Strings with their allowed values
+// recorded in a comment above each one, matching the TypeScript unions. That
+// kept the model identical on SQLite (used during early development) and on
+// Postgres, which is what runs in deployment — Railway's filesystem is
+// ephemeral, so a file-backed database would be wiped on every redeploy.
+//
+// Money is stored as Float. That is consistent with the variance engine, which
+// computes in IEEE-754 doubles. If exact decimal arithmetic becomes a
+// requirement, move rates and amounts to Decimal and change the engine at the
+// same time — doing one without the other buys nothing.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A tenant. Every business record hangs off exactly one of these.
+model Organisation {
+  id            String   @id @default(cuid())
+  name          String
+  gstin         String
+  defaultCityId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  defaultCity   City            @relation(fields: [defaultCityId], references: [id])
+  users         User[]
+  invoices      Invoice[]
+  subscription  Subscription?
+  rateUploads   RateUpload[]
+  cronJobs      CronJob[]
+  activity      ActivityEvent[]
+  sorEntries    SorEntry[]
+
+  @@index([defaultCityId])
+}
+
+/// role: owner | admin | estimator | auditor | viewer
+/// status: active | invited | suspended
+model User {
+  id             String   @id @default(cuid())
+  organisationId String
+  name           String
+  email          String   @unique
+  passwordHash   String
+  role           String
+  status         String   @default("active")
+  lastActive     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  sessions         Session[]
+  uploadedInvoices Invoice[]
+  rateUploads      RateUpload[]
+
+  @@index([organisationId])
+}
+
+/// Only the SHA-256 of the session token is stored, so a database leak does not
+/// hand out live sessions.
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// tierId: starter | professional | enterprise
+/// status: active | trialing | past_due | cancelled
+/// billingCycle: monthly | annual
+model Subscription {
+  id             String   @id @default(cuid())
+  organisationId String   @unique
+  tierId         String
+  status         String
+  billingCycle   String
+  renewsOn       DateTime
+  documentsUsed  Int      @default(0)
+  seatsUsed      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+}
+
+/// City cost-index factors used to localise SoR base rates — FR-3.3.
+model City {
+  id          String @id
+  name        String
+  state       String
+  pin         String
+  indexFactor Float
+
+  organisations Organisation[]
+  invoices      Invoice[]
+}
+
+/// Schedule of Rates baseline — FR-3.1.
+/// organisationId null = shared public rate book (CPWD/State PWD).
+/// organisationId set  = a tenant's own negotiated rate card, which takes
+/// priority over the public book when matching.
+model SorEntry {
+  id             String   @id @default(cuid())
+  organisationId String?
+  code           String
+  description    String
+  unit           String
+  baseRate       Float
+  source         String
+  chapter        String
+  effectiveFrom  DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  lineItems    LineItem[]
+
+  // NULL organisationId rows are the shared book; SQL treats NULLs as distinct
+  // in a unique constraint, so global code uniqueness is enforced in the seed
+  // and the rate-import path rather than by the database.
+  @@unique([organisationId, code])
+  @@index([organisationId])
+  @@index([code])
+}
+
+/// documentType: invoice | quotation
+/// status: rejected | queued | extracting | needs_review | analysed | failed
+model Invoice {
+  id             String    @id @default(cuid())
+  organisationId String
+  number         String
+  documentType   String
+  vendor         String
+  vendorGstin    String
+  project        String
+  cityId         String
+  uploadedById   String
+  uploadedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  status         String
+  fileName       String
+  fileSizeKb     Int
+  pageCount      Int
+  taxPct         Float
+
+  // Quality gate outcome — FR-1.2
+  qualityPassed   Boolean
+  qualityScore    Float
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organisation  Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  city          City            @relation(fields: [cityId], references: [id])
+  uploadedBy    User            @relation(fields: [uploadedById], references: [id])
+  lineItems     LineItem[]
+  qualityChecks QualityCheck[]
+  activity      ActivityEvent[]
+
+  @@index([organisationId, uploadedAt])
+  @@index([organisationId, status])
+  @@index([cityId])
+  @@index([uploadedById])
+}
+
+model QualityCheck {
+  id        String  @id @default(cuid())
+  invoiceId String
+  key       String
+  label     String
+  passed    Boolean
+  detail    String
+  position  Int
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// One extracted line, plus how it was matched to the rate book.
+/// Deleting an invoice cascades to its lines, quotes and checks — and stops
+/// there. Deletion never reaches other invoices or account data (FR-11.2).
+model LineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  srNo        Int
+  description String
+  unit        String
+  quantity    Float
+  rate        Float
+  amount      Float
+
+  // Per-field OCR confidence — FR-2.3
+  confDescription Float @default(1)
+  confQuantity    Float @default(1)
+  confRate        Float @default(1)
+  corrected       Boolean @default(false)
+
+  // SoR match — FR-3.2. Null when no baseline could be matched.
+  sorEntryId      String?
+  sorMatchScore   Float?
+  sorIndexFactor  Float?
+  sorAdjustedRate Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sorEntry     SorEntry?     @relation(fields: [sorEntryId], references: [id])
+  marketQuotes MarketQuote[]
+
+  @@index([invoiceId])
+  @@index([sorEntryId])
+}
+
+/// platform: IndiaMART | Moglix | TradeIndia | Amazon Business | Direct dealer
+model MarketQuote {
+  id         String   @id @default(cuid())
+  lineItemId String
+  seller     String
+  platform   String
+  price      Float
+  unit       String
+  location   String
+  url        String
+  fetchedAt  DateTime
+  inStock    Boolean  @default(true)
+
+  lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+
+  @@index([lineItemId])
+  @@index([fetchedAt])
+}
+
+/// status: processed | processing | failed
+model RateUpload {
+  id             String   @id @default(cuid())
+  organisationId String
+  uploadedById   String
+  fileName       String
+  uploadedAt     DateTime @default(now())
+  rowsTotal      Int
+  rowsAccepted   Int
+  rowsRejected   Int
+  status         String
+  note           String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+
+  @@index([organisationId, uploadedAt])
+  @@index([uploadedById])
+}
+
+/// lastStatus: success | partial | failed
+model CronJob {
+  id             String   @id @default(cuid())
+  organisationId String
+  name           String
+  schedule       String
+  target         String
+  lastRun        DateTime
+  nextRun        DateTime
+  lastStatus     String
+  itemsRefreshed Int      @default(0)
+  enabled        Boolean  @default(true)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId])
+}
+
+/// kind: upload | analysis | correction | export | rate_update | member | billing
+model ActivityEvent {
+  id             String   @id @default(cuid())
+  organisationId String
+  invoiceId      String?
+  kind           String
+  actor          String
+  message        String
+  at             DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, at])
+  @@index([invoiceId])
+}

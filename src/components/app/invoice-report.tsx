@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Progress } from "@/components/ui/misc";
 import { Table, TableWrap, TBody, TD, TH, THead } from "@/components/ui/table";
 import { VarianceBadge, VariancePct } from "@/components/variance-badge";
-import { usePrototype } from "@/components/app/prototype-context";
+import { useSession } from "@/components/app/session-context";
 import { analyseLines, summarise, VARIANCE_CONFIG } from "@/lib/variance";
 import type { AnalysedInvoice, LineItem, VarianceFlag } from "@/lib/types";
 import { cn, formatINR, formatNumber, relativeTime } from "@/lib/utils";
@@ -29,7 +29,7 @@ const LOW_CONFIDENCE = 0.8;
 type FilterKey = "all" | VarianceFlag | "unmatched";
 
 export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
-  const { allows, entitled } = usePrototype();
+  const { allows, entitled } = useSession();
 
   // Corrections are held locally; the variance engine re-runs on every edit so
   // the effect of a correction is visible immediately — FR-2.3 into FR-5.2.

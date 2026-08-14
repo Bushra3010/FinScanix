@@ -16,16 +16,26 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { buttonStyles } from "@/components/ui/button";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { VarianceBadge, VariancePct } from "@/components/variance-badge";
-import { ANALYSED_INVOICES, REPORTED_INVOICES } from "@/lib/data/invoices";
-import { ACTIVITY, MONTHLY_TREND, ORGANISATION } from "@/lib/data/org";
+import { requireUser } from "@/lib/auth/guard";
+import { listActivity, listInvoices, listReportedInvoices } from "@/lib/db/queries";
+import { MONTHLY_TREND } from "@/lib/data/org";
 import { formatINR, relativeTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const user = await requireUser();
+  const organisationId = user.organisation.id;
+
+  const [allInvoices, reportedInvoices, activity] = await Promise.all([
+    listInvoices(organisationId),
+    listReportedInvoices(organisationId),
+    listActivity(organisationId, 7),
+  ]);
+
   // Roll-ups are derived from the same analysed invoices the reports use, so
   // the dashboard can never disagree with an individual report.
-  const flags = REPORTED_INVOICES.reduce(
+  const flags = reportedInvoices.reduce(
     (acc, invoice) => ({
       over: acc.over + invoice.summary.overCount,
       par: acc.par + invoice.summary.parCount,
@@ -35,13 +45,13 @@ export default function DashboardPage() {
     { over: 0, par: 0, under: 0, unmatched: 0 },
   );
 
-  const recoverable = REPORTED_INVOICES.reduce((sum, i) => sum + i.summary.potentialSaving, 0);
-  const billedTotal = REPORTED_INVOICES.reduce((sum, i) => sum + i.subtotal, 0);
-  const benchmarkTotal = REPORTED_INVOICES.reduce((sum, i) => sum + i.summary.benchmarkTotal, 0);
+  const recoverable = reportedInvoices.reduce((sum, i) => sum + i.summary.potentialSaving, 0);
+  const billedTotal = reportedInvoices.reduce((sum, i) => sum + i.subtotal, 0);
+  const benchmarkTotal = reportedInvoices.reduce((sum, i) => sum + i.summary.benchmarkTotal, 0);
   const overallVariance =
     benchmarkTotal > 0 ? ((billedTotal - benchmarkTotal) / benchmarkTotal) * 100 : 0;
 
-  const topOverpriced = REPORTED_INVOICES.flatMap((invoice) =>
+  const topOverpriced = reportedInvoices.flatMap((invoice) =>
     invoice.lineItems
       .filter((line) => line.variance.flag === "over")
       .map((line) => ({ line, invoice })),
@@ -50,7 +60,7 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   const vendorExposure = Object.values(
-    REPORTED_INVOICES.reduce<Record<string, { label: string; value: number; docs: number }>>(
+    reportedInvoices.reduce<Record<string, { label: string; value: number; docs: number }>>(
       (acc, invoice) => {
         const entry = acc[invoice.vendor] ?? { label: invoice.vendor, value: 0, docs: 0 };
         entry.value += invoice.summary.potentialSaving;
@@ -69,14 +79,14 @@ export default function DashboardPage() {
       hint: `${v.docs} document${v.docs === 1 ? "" : "s"} reviewed`,
     }));
 
-  const recent = [...ANALYSED_INVOICES]
+  const recent = [...allInvoices]
     .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
     .slice(0, 6);
 
   return (
     <>
       <PageHeader
-        title={`Good morning, ${ORGANISATION.name.split(" ")[0]} team`}
+        title={`Good morning, ${user.organisation.name.split(" ")[0]} team`}
         description="Variance across every document processed this cycle, and what is still waiting on a reviewer."
         actions={
           <Can permission="invoice.upload">
@@ -92,7 +102,7 @@ export default function DashboardPage() {
         <StatCard
           icon={Receipt}
           label="Documents this cycle"
-          value={ORGANISATION.subscription.documentsUsed.toLocaleString("en-IN")}
+          value={user.organisation.subscription.documentsUsed.toLocaleString("en-IN")}
           hint="Billing cycle resets 1 Sep"
           tone="brand"
         />
@@ -237,10 +247,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             <ul className="divide-y divide-border">
-              {[...ACTIVITY]
-                .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-                .slice(0, 7)
-                .map((event) => (
+              {activity.map((event) => (
                   <li key={event.id} className="px-5 py-3">
                     <p className="text-[13px] leading-relaxed text-foreground">
                       {event.invoiceId ? (
@@ -259,7 +266,7 @@ export default function DashboardPage() {
                       {relativeTime(event.at, new Date("2026-08-14T10:00:00+05:30"))}
                     </p>
                   </li>
-                ))}
+              ))}
             </ul>
           </CardContent>
         </Card>
@@ -323,8 +330,8 @@ export default function DashboardPage() {
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-5 py-4">
         <div>
           <p className="text-[13.5px] font-medium text-foreground">
-            {REPORTED_INVOICES.filter((i) => i.status === "needs_review").length} document
-            {REPORTED_INVOICES.filter((i) => i.status === "needs_review").length === 1 ? "" : "s"}{" "}
+            {reportedInvoices.filter((i) => i.status === "needs_review").length} document
+            {reportedInvoices.filter((i) => i.status === "needs_review").length === 1 ? "" : "s"}{" "}
             waiting on review
           </p>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">

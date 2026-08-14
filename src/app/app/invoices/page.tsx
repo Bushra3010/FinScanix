@@ -8,7 +8,8 @@ import { buttonStyles } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/misc";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { VariancePct } from "@/components/variance-badge";
-import { ANALYSED_INVOICES } from "@/lib/data/invoices";
+import { requireUser } from "@/lib/auth/guard";
+import { listInvoices } from "@/lib/db/queries";
 import type { InvoiceStatus } from "@/lib/types";
 import { cn, formatDate, formatINR } from "@/lib/utils";
 
@@ -30,15 +31,18 @@ export default async function InvoicesPage({
   const { status } = await searchParams;
   const active = FILTERS.some((f) => f.value === status) ? status! : "all";
 
-  const invoices = [...ANALYSED_INVOICES]
-    .filter((invoice) => active === "all" || invoice.status === (active as InvoiceStatus))
-    .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  const user = await requireUser();
+  const allInvoices = await listInvoices(user.organisation.id);
+
+  const invoices = allInvoices.filter(
+    (invoice) => active === "all" || invoice.status === (active as InvoiceStatus),
+  );
 
   const counts = FILTERS.reduce<Record<string, number>>((acc, filter) => {
     acc[filter.value] =
       filter.value === "all"
-        ? ANALYSED_INVOICES.length
-        : ANALYSED_INVOICES.filter((i) => i.status === filter.value).length;
+        ? allInvoices.length
+        : allInvoices.filter((i) => i.status === filter.value).length;
     return acc;
   }, {});
 
@@ -178,7 +182,7 @@ export default async function InvoicesPage({
       </Card>
 
       <p className="mt-3 text-[12px] text-muted-foreground">
-        Showing {invoices.length} of {ANALYSED_INVOICES.length} documents. Rejected uploads do not
+        Showing {invoices.length} of {allInvoices.length} documents. Rejected uploads do not
         consume extraction quota.
       </p>
     </>

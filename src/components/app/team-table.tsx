@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/field";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { usePrototype, useTier } from "@/components/app/prototype-context";
-import { ROLE_LABEL, ROLE_SUMMARY, USERS } from "@/lib/data/org";
-import type { Role } from "@/lib/types";
+import { useSession, useTier } from "@/components/app/session-context";
+import { ROLE_LABEL, ROLE_SUMMARY } from "@/lib/data/org";
+import type { Role, User } from "@/lib/types";
 import { formatDate, initials } from "@/lib/utils";
 
 const PERMISSION_MATRIX: { label: string; roles: Role[] }[] = [
@@ -25,14 +25,15 @@ const PERMISSION_MATRIX: { label: string; roles: Role[] }[] = [
 
 const ALL_ROLES: Role[] = ["owner", "admin", "estimator", "auditor", "viewer"];
 
-export function TeamTable() {
-  const { role: myRole } = usePrototype();
+export function TeamTable({ users }: { users: User[] }) {
+  const { user: me } = useSession();
+  const myRole = me.role;
   const tier = useTier();
   const [roles, setRoles] = useState<Record<string, Role>>(() =>
-    Object.fromEntries(USERS.map((user) => [user.id, user.role])),
+    Object.fromEntries(users.map((user) => [user.id, user.role])),
   );
 
-  const activeSeats = USERS.filter((u) => u.status !== "suspended").length;
+  const activeSeats = users.filter((u) => u.status !== "suspended").length;
   const seatLimit = tier.seats;
   const seatsFull = seatLimit !== null && activeSeats >= seatLimit;
 
@@ -60,7 +61,7 @@ export function TeamTable() {
                 </tr>
               </THead>
               <TBody>
-                {USERS.map((user) => (
+                {users.map((user) => (
                   <TR key={user.id}>
                     <TD>
                       <div className="flex items-center gap-2.5">

@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CreditCard, Download, LoaderCircle, ShieldCheck } from "lucide-react";
+import { Check, CircleAlert, CreditCard, Download, LoaderCircle, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/misc";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { usePrototype, useTier } from "@/components/app/prototype-context";
-import { mockPayments } from "@/lib/adapters/mock";
-import { ORGANISATION, TIERS, USERS } from "@/lib/data/org";
-import type { TierId } from "@/lib/types";
+import { useSession, useTier } from "@/components/app/session-context";
+import { changePlanAction, type PlanChangeState } from "@/lib/billing/actions";
+import { TIERS, getTier } from "@/lib/data/org";
 import { cn, formatDate, formatINR } from "@/lib/utils";
 
+/**
+ * Illustrative until the gateway is connected — real tax invoices are issued
+ * and stored by the payment provider, not by FinScanix.
+ */
 const PAYMENT_HISTORY = [
   { id: "RZP-2026-08-0114", at: "2026-08-01T00:12:00+05:30", amount: 14999, status: "Paid" },
   { id: "RZP-2026-07-0098", at: "2026-07-01T00:09:00+05:30", amount: 14999, status: "Paid" },
@@ -21,56 +24,55 @@ const PAYMENT_HISTORY = [
   { id: "RZP-2026-05-0067", at: "2026-05-01T00:14:00+05:30", amount: 4999, status: "Paid" },
 ];
 
-export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
+export function BillingPanel({ seatsUsed }: { seatsUsed: number }) {
   const router = useRouter();
-  const { tierId, setTierId } = usePrototype();
+  const { user, allows } = useSession();
   const tier = useTier();
-  const [pending, setPending] = useState<TierId | null>(null);
-  const [confirmed, setConfirmed] = useState<TierId | null>(null);
+  const [state, formAction, pending] = useActionState<PlanChangeState, FormData>(
+    changePlanAction,
+    {},
+  );
 
-  // Returning from the (mock) gateway activates the tier. In production this
-  // only happens from the gateway webhook, never from the browser redirect.
+  const subscription = user.organisation.subscription;
+  const canManage = allows("billing.manage");
+
+  // A live gateway hands back a hosted checkout URL to send the user to.
   useEffect(() => {
-    if (!checkoutTier) return;
-    setTierId(checkoutTier);
-    setConfirmed(checkoutTier);
-  }, [checkoutTier, setTierId]);
+    if (state.checkoutUrl) router.push(state.checkoutUrl);
+  }, [state.checkoutUrl, router]);
 
-  const subscription = ORGANISATION.subscription;
-  const documentsUsed = subscription.documentsUsed;
+  // The plan lives on the session, so pull a fresh one after a change.
+  useEffect(() => {
+    if (state.appliedTier) router.refresh();
+  }, [state.appliedTier, router]);
+
   const quota = tier.documentQuota;
+  const documentsUsed = subscription.documentsUsed;
   const docPct = quota ? (documentsUsed / quota) * 100 : 0;
-  const seatsUsed = USERS.filter((u) => u.status !== "suspended").length;
   const seatPct = tier.seats ? (seatsUsed / tier.seats) * 100 : 0;
-
-  async function startCheckout(target: TierId) {
-    setPending(target);
-    const session = await mockPayments.createCheckout({
-      tierId: target,
-      billingCycle: subscription.billingCycle,
-      organisationId: ORGANISATION.id,
-    });
-    setTimeout(() => {
-      setPending(null);
-      router.push(session.checkoutUrl);
-    }, 700);
-  }
 
   return (
     <div className="space-y-6">
-      {confirmed && (
+      {state.appliedTier && (
         <div className="flex items-start gap-2.5 rounded-xl border border-par/40 bg-par-soft/50 p-4">
           <Check className="mt-0.5 h-4 w-4 shrink-0 text-par" />
           <div>
             <p className="text-[13.5px] font-semibold text-foreground">
-              {TIERS.find((t) => t.id === confirmed)?.name} plan activated
+              {getTier(state.appliedTier).name} plan activated
             </p>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              Entitlements updated across the app — check the sidebar, the export buttons and the
-              assistant. In production this activation is driven by the gateway webhook, not the
-              browser redirect, so a cancelled payment can never unlock a tier.
+              Written to the subscription record, so entitlements changed everywhere at once —
+              the sidebar, export buttons and assistant all follow it. With a live gateway this
+              activation is driven by the payment webhook rather than the browser.
             </p>
           </div>
+        </div>
+      )}
+
+      {state.error && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-over/40 bg-over-soft/50 p-4">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
+          <p className="text-[13px] text-foreground">{state.error}</p>
         </div>
       )}
 
@@ -110,7 +112,7 @@ export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
                   className="mt-2"
                 />
               )}
-              {quota && docPct > 100 && (
+              {quota && documentsUsed > quota && (
                 <p className="mt-1.5 text-[12px] text-over">
                   Over quota — uploads are blocked until the cycle resets or the plan is upgraded.
                 </p>
@@ -143,39 +145,36 @@ export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Payment method</CardTitle>
-                <CardDescription>Managed by the payment gateway</CardDescription>
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Payment method</CardTitle>
+              <CardDescription>Managed by the payment gateway</CardDescription>
+            </div>
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-sunken/50 p-3.5">
+              <div className="flex h-9 w-12 items-center justify-center rounded-md bg-surface text-[11px] font-semibold text-foreground">
+                VISA
               </div>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-sunken/50 p-3.5">
-                <div className="flex h-9 w-12 items-center justify-center rounded-md bg-surface text-[11px] font-semibold text-foreground">
-                  VISA
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="tnum text-[13px] font-medium text-foreground">•••• •••• •••• 4821</p>
-                  <p className="text-[11.5px] text-muted-foreground">Expires 09/2029</p>
-                </div>
+              <div className="min-w-0 flex-1">
+                <p className="tnum text-[13px] font-medium text-foreground">•••• •••• •••• 4821</p>
+                <p className="text-[11.5px] text-muted-foreground">Expires 09/2029</p>
               </div>
-              <Button size="sm" variant="outline" className="mt-3 w-full">
-                Update payment method
-              </Button>
-              <p className="mt-3 flex gap-2 text-[11.5px] leading-relaxed text-muted-foreground">
-                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Card details are entered on the gateway&apos;s own hosted page. FinScanix never
-                sees or stores them.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+            <Button size="sm" variant="outline" className="mt-3 w-full" disabled={!canManage}>
+              Update payment method
+            </Button>
+            <p className="mt-3 flex gap-2 text-[11.5px] leading-relaxed text-muted-foreground">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Card details are entered on the gateway&apos;s own hosted page. FinScanix never sees
+              or stores them.
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Plan switcher */}
       <Card>
         <CardHeader>
           <div>
@@ -189,18 +188,21 @@ export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
         <CardContent>
           <div className="grid gap-4 lg:grid-cols-3">
             {TIERS.map((option) => {
-              const isCurrent = option.id === tierId;
-              const currentIndex = TIERS.findIndex((t) => t.id === tierId);
+              const isCurrent = option.id === subscription.tierId;
+              const currentIndex = TIERS.findIndex((t) => t.id === subscription.tierId);
               const optionIndex = TIERS.findIndex((t) => t.id === option.id);
 
               return (
-                <div
+                <form
                   key={option.id}
+                  action={formAction}
                   className={cn(
                     "flex flex-col rounded-xl border p-5",
                     isCurrent ? "border-brand bg-brand-soft/30" : "border-border bg-background",
                   )}
                 >
+                  <input type="hidden" name="tierId" value={option.id} />
+
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[15px] font-semibold text-foreground">{option.name}</p>
                     {isCurrent && <Badge tone="brand">Current</Badge>}
@@ -218,16 +220,16 @@ export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
                   </p>
 
                   <Button
+                    type="submit"
                     size="sm"
-                    variant={isCurrent ? "outline" : optionIndex > currentIndex ? "primary" : "outline"}
+                    variant={!isCurrent && optionIndex > currentIndex ? "primary" : "outline"}
                     className="mt-4 w-full"
-                    disabled={isCurrent || pending !== null}
-                    onClick={() => startCheckout(option.id)}
+                    disabled={isCurrent || pending || !canManage}
                   >
-                    {pending === option.id ? (
+                    {pending ? (
                       <>
                         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                        Opening checkout…
+                        Working…
                       </>
                     ) : isCurrent ? (
                       "Current plan"
@@ -237,20 +239,19 @@ export function BillingPanel({ checkoutTier }: { checkoutTier?: TierId }) {
                       `Switch to ${option.name}`
                     )}
                   </Button>
-                </div>
+                </form>
               );
             })}
           </div>
 
           <p className="mt-4 text-[12px] leading-relaxed text-muted-foreground">
-            Checkout runs through the payment adapter. With no gateway credentials configured it
-            uses a mock that returns here immediately — no card details are collected anywhere in
-            this prototype.
+            {canManage
+              ? "Checkout runs through the payment adapter. With no gateway credentials configured it uses a mock that applies the change directly — no card details are collected anywhere in this build."
+              : "Only the account owner can change the subscription."}
           </p>
         </CardContent>
       </Card>
 
-      {/* History */}
       <Card>
         <CardHeader>
           <div>

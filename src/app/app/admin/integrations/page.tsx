@@ -1,25 +1,39 @@
 import type { Metadata } from "next";
 import { KeyRound, Plug, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/app/page-parts";
-import { RequirePermission } from "@/components/app/gates";
+import { AccessDenied } from "@/components/app/access-denied";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SERVICE_STATUS } from "@/lib/adapters";
+import { gateFor, requireUser } from "@/lib/auth/guard";
 
 export const metadata: Metadata = { title: "Integrations" };
 
-export default function IntegrationsPage() {
+export default async function IntegrationsPage() {
+  const user = await requireUser();
+  const gate = gateFor(user);
+
+  const header = (
+    <PageHeader
+      title="Integrations"
+      description="Every external dependency sits behind an adapter. A service goes live the moment its credentials are present — until then it runs on a mock, so nothing in the app breaks."
+    />
+  );
+
+  if (!gate.allows("rates.manage")) {
+    return (
+      <>
+        {header}
+        <AccessDenied message="Integration configuration is restricted to owners and admins." />
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHeader
-        title="Integrations"
-        description="Every external dependency sits behind an adapter. A service goes live the moment its credentials are present — until then it runs on a mock, so nothing in the app breaks."
-      />
+      {header}
 
-      <RequirePermission
-        permission="rates.manage"
-        message="Integration configuration is restricted to owners and admins."
-      >
+      <>
         <div className="grid gap-4 lg:grid-cols-2">
           {SERVICE_STATUS.map((service) => (
             <Card key={service.key}>
@@ -116,7 +130,7 @@ export default function IntegrationsPage() {
             </CardContent>
           </Card>
         </div>
-      </RequirePermission>
+      </>
     </>
   );
 }

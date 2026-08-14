@@ -6,8 +6,7 @@ import { Check, Download, FileSpreadsheet, LoaderCircle, Lock } from "lucide-rea
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/field";
-import { usePrototype } from "@/components/app/prototype-context";
-import { REPORTED_INVOICES } from "@/lib/data/invoices";
+import { useSession } from "@/components/app/session-context";
 
 const INCLUDES = [
   { id: "evidence", label: "SoR reference and city index per line", default: true },
@@ -17,13 +16,17 @@ const INCLUDES = [
   { id: "method", label: "Methodology and engine configuration", default: true },
 ];
 
-export function ReportBuilder() {
-  const { allows, entitled } = usePrototype();
+export function ReportBuilder({
+  projects,
+  vendors,
+}: {
+  projects: string[];
+  vendors: string[];
+}) {
+  const { allows, entitled } = useSession();
   const [format, setFormat] = useState<"pdf" | "excel">("pdf");
   const [state, setState] = useState<"idle" | "working" | "ready">("idle");
 
-  const projects = Array.from(new Set(REPORTED_INVOICES.map((i) => i.project)));
-  const vendors = Array.from(new Set(REPORTED_INVOICES.map((i) => i.vendor)));
   const excelLocked = !entitled("export_excel");
   const canExport = allows("report.export");
 
@@ -199,7 +202,7 @@ export function ReportBuilder() {
 }
 
 export function ExportButtons() {
-  const { allows, entitled } = usePrototype();
+  const { allows, entitled } = useSession();
   if (!allows("report.export")) return null;
 
   return (

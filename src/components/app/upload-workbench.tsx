@@ -19,11 +19,9 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/field";
 import { Progress } from "@/components/ui/misc";
-import { usePrototype, useTier } from "@/components/app/prototype-context";
+import { useSession, useTier } from "@/components/app/session-context";
 import { mockQualityGate } from "@/lib/adapters/mock";
-import { CITIES } from "@/lib/data/reference";
-import { ORGANISATION } from "@/lib/data/org";
-import type { QualityReport } from "@/lib/types";
+import type { City, QualityReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Stage = "idle" | "uploading" | "gating" | "rejected" | "extracting" | "done";
@@ -66,8 +64,8 @@ const STAGE_STEPS = [
   { id: "done", label: "Matching to SoR and market prices" },
 ];
 
-export function UploadWorkbench() {
-  const { cityId, setCityId } = usePrototype();
+export function UploadWorkbench({ cities }: { cities: City[] }) {
+  const { user, cityId, setCityId } = useSession();
   const tier = useTier();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -76,7 +74,7 @@ export function UploadWorkbench() {
   const [report, setReport] = useState<QualityReport | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const used = ORGANISATION.subscription.documentsUsed;
+  const used = user.organisation.subscription.documentsUsed;
   const quota = tier.documentQuota;
   const quotaPct = quota ? (used / quota) * 100 : 0;
   const quotaExhausted = quota !== null && used >= quota;
@@ -380,7 +378,7 @@ export function UploadWorkbench() {
                 value={cityId}
                 onChange={(event) => setCityId(event.target.value)}
               >
-                {CITIES.map((city) => (
+                {cities.map((city) => (
                   <option key={city.id} value={city.id}>
                     {city.name}, {city.state} — index {city.indexFactor.toFixed(2)}
                   </option>

@@ -1,31 +1,26 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import Link from "next/link";
-import { Info, LoaderCircle } from "lucide-react";
+import { CircleAlert, Info, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FieldHint, Input, Label, Select } from "@/components/ui/field";
+import { loginAction, registerAction, type AuthState } from "@/lib/auth/actions";
 import { CITIES } from "@/lib/data/reference";
 import { TIERS } from "@/lib/data/org";
 import type { TierId } from "@/lib/types";
 
 /**
- * Prototype auth. No credentials are validated, transmitted or stored — the
- * form exists to demonstrate the flow and the field set. Real auth replaces the
- * submit handler with a server action.
+ * Credentials are posted to a server action, verified against a scrypt hash,
+ * and exchanged for a database-backed session cookie. Nothing about the
+ * password reaches the client bundle or the URL.
  */
 export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: TierId }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setTimeout(() => router.push("/app/dashboard"), 550);
-  }
-
   const isRegister = mode === "register";
+  const [state, formAction, pending] = useActionState<AuthState, FormData>(
+    isRegister ? registerAction : loginAction,
+    {},
+  );
 
   return (
     <div>
@@ -38,16 +33,26 @@ export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: Ti
           : "Verify vendor rates against SoR and live market pricing."}
       </p>
 
-      <div className="mt-5 flex gap-2.5 rounded-lg border border-border bg-brand-soft/50 px-3.5 py-3">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-        <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">Prototype build.</span> Nothing you
-          type here is checked, sent or stored — use placeholder details and press{" "}
-          {isRegister ? "Create account" : "Sign in"} to enter the app.
-        </p>
-      </div>
+      {!isRegister && (
+        <div className="mt-5 flex gap-2.5 rounded-lg border border-border bg-brand-soft/50 px-3.5 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">Demo data seeded.</span> Sign in as{" "}
+            <code className="font-mono text-[11.5px] text-foreground">asif@meridian-infra.in</code>{" "}
+            (owner) or any seeded account — the password is in the README. Other roles show the
+            access restrictions in action.
+          </p>
+        </div>
+      )}
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+      {state.error && (
+        <div className="mt-5 flex gap-2.5 rounded-lg border border-over/40 bg-over-soft/50 px-3.5 py-3">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
+          <p className="text-[12.5px] leading-relaxed text-foreground">{state.error}</p>
+        </div>
+      )}
+
+      <form action={formAction} className="mt-6 space-y-4">
         {isRegister && (
           <>
             <div>
@@ -86,7 +91,7 @@ export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: Ti
             id="password"
             name="password"
             type="password"
-            autoComplete="new-password"
+            autoComplete={isRegister ? "new-password" : "current-password"}
             placeholder="••••••••••"
             required
           />

@@ -3,36 +3,31 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Bell,
-  ChevronDown,
-  Lock,
-  LogOut,
-  MapPin,
-  Menu,
-  Search,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { Bell, ChevronDown, Lock, LogOut, MapPin, Menu, Search, X } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { Progress } from "@/components/ui/misc";
 import { NAV_SECTIONS } from "@/components/app/nav-config";
-import { usePrototype, useTier } from "@/components/app/prototype-context";
+import { useSession, useTier } from "@/components/app/session-context";
 import { AssistantWidget } from "@/components/app/assistant-widget";
-import { CITIES, getCity } from "@/lib/data/reference";
-import { CURRENT_USER, ORGANISATION, ROLE_LABEL, ROLE_SUMMARY, TIERS } from "@/lib/data/org";
-import type { Role, TierId } from "@/lib/types";
+import { logoutAction } from "@/lib/auth/actions";
+import { ROLE_LABEL } from "@/lib/data/org";
+import type { City } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  cities,
+}: {
+  children: React.ReactNode;
+  cities: City[];
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Mobile scrim */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-foreground/30 backdrop-blur-[2px] lg:hidden"
@@ -44,7 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       <div className="lg:pl-64">
-        <Topbar onMenu={() => setMobileOpen(true)} />
+        <Topbar onMenu={() => setMobileOpen(true)} cities={cities} />
         <main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
 
@@ -57,11 +52,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const pathname = usePathname();
-  const { allows, entitled } = usePrototype();
+  const { user, allows, entitled } = useSession();
   const tier = useTier();
 
   const quota = tier.documentQuota;
-  const used = ORGANISATION.subscription.documentsUsed;
+  const used = user.organisation.subscription.documentsUsed;
   const pct = quota ? (used / quota) * 100 : 0;
 
   return (
@@ -184,14 +179,16 @@ const TITLES: { match: string; title: string; exact?: boolean }[] = [
   { match: "/app/settings", title: "Settings" },
 ];
 
-function Topbar({ onMenu }: { onMenu: () => void }) {
+function Topbar({ onMenu, cities }: { onMenu: () => void; cities: City[] }) {
   const pathname = usePathname();
-  const { cityId, setCityId } = usePrototype();
-  const [menu, setMenu] = useState<"none" | "user" | "demo">("none");
+  const { cityId, setCityId } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const title =
     TITLES.find((t) => (t.exact ? pathname === t.match : pathname.startsWith(t.match)))?.title ??
     "FinScanix";
+
+  const activeCity = cities.find((city) => city.id === cityId) ?? cities[0];
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur-md">
@@ -225,26 +222,16 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
               onChange={(event) => setCityId(event.target.value)}
               className="cursor-pointer bg-transparent pr-1 text-foreground focus:outline-none"
             >
-              {CITIES.map((city) => (
+              {cities.map((city) => (
                 <option key={city.id} value={city.id}>
                   {city.name}
                 </option>
               ))}
             </select>
             <span className="tnum text-muted-foreground">
-              ×{getCity(cityId).indexFactor.toFixed(2)}
+              ×{activeCity?.indexFactor.toFixed(2)}
             </span>
           </label>
-
-          <button
-            type="button"
-            onClick={() => setMenu(menu === "demo" ? "none" : "demo")}
-            className="cursor-pointer rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label="Prototype controls"
-            title="Prototype controls"
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-          </button>
 
           <ThemeToggle />
 
@@ -257,40 +244,49 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
             <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-over" />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setMenu(menu === "user" ? "none" : "user")}
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg py-1 pr-1.5 pl-1 transition-colors hover:bg-muted"
-          >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-brand-foreground">
-              {initials(CURRENT_USER.name)}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
+          <UserButton open={menuOpen} onToggle={() => setMenuOpen((v) => !v)} />
         </div>
       </div>
 
-      {menu !== "none" && (
+      {menuOpen && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenu("none")} aria-hidden />
-          {menu === "user" ? <UserMenu onClose={() => setMenu("none")} /> : <DemoControls />}
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} aria-hidden />
+          <UserMenu onClose={() => setMenuOpen(false)} />
         </>
       )}
     </header>
   );
 }
 
+function UserButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { user } = useSession();
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className="flex cursor-pointer items-center gap-1.5 rounded-lg py-1 pr-1.5 pl-1 transition-colors hover:bg-muted"
+    >
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-brand-foreground">
+        {initials(user.name)}
+      </span>
+      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+    </button>
+  );
+}
+
 function UserMenu({ onClose }: { onClose: () => void }) {
-  const { role } = usePrototype();
+  const { user } = useSession();
 
   return (
     <div className="absolute right-4 z-50 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-surface shadow-pop sm:right-6 lg:right-8">
       <div className="border-b border-border px-4 py-3">
-        <p className="text-[13.5px] font-semibold text-foreground">{CURRENT_USER.name}</p>
-        <p className="truncate text-[12px] text-muted-foreground">{CURRENT_USER.email}</p>
-        <Badge tone="brand" className="mt-2">
-          {ROLE_LABEL[role]}
-        </Badge>
+        <p className="text-[13.5px] font-semibold text-foreground">{user.name}</p>
+        <p className="truncate text-[12px] text-muted-foreground">{user.email}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <Badge tone="brand">{ROLE_LABEL[user.role]}</Badge>
+          <Badge tone="outline">{user.organisation.name}</Badge>
+        </div>
       </div>
       <div className="p-1.5">
         <Link
@@ -316,82 +312,15 @@ function UserMenu({ onClose }: { onClose: () => void }) {
         </Link>
       </div>
       <div className="border-t border-border p-1.5">
-        <Link
-          href="/login"
-          onClick={onClose}
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-/** Prototype-only: lets a reviewer see RBAC and tier gating without seeding accounts. */
-function DemoControls() {
-  const { role, setRole, tierId, setTierId } = usePrototype();
-
-  return (
-    <div className="absolute right-4 z-50 mt-1 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-pop sm:right-6 lg:right-8">
-      <div className="border-b border-border bg-surface-sunken/60 px-4 py-3">
-        <p className="text-[13px] font-semibold text-foreground">Prototype controls</p>
-        <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
-          Not part of the product. Switch role and plan to see the access and tier gating the
-          server would enforce.
-        </p>
-      </div>
-
-      <div className="space-y-4 p-4">
-        <div>
-          <label
-            htmlFor="demo-role"
-            className="mb-1.5 block text-[12.5px] font-medium text-foreground"
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            Signed-in role
-          </label>
-          <select
-            id="demo-role"
-            value={role}
-            onChange={(event) => setRole(event.target.value as Role)}
-            className="h-9 w-full cursor-pointer rounded-lg border border-border-strong bg-background px-2.5 text-[13px] text-foreground focus:border-brand focus:outline-none"
-          >
-            {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
-              <option key={r} value={r}>
-                {ROLE_LABEL[r]}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-            {ROLE_SUMMARY[role]}
-          </p>
-        </div>
-
-        <div>
-          <label
-            htmlFor="demo-tier"
-            className="mb-1.5 block text-[12.5px] font-medium text-foreground"
-          >
-            Active subscription
-          </label>
-          <select
-            id="demo-tier"
-            value={tierId}
-            onChange={(event) => setTierId(event.target.value as TierId)}
-            className="h-9 w-full cursor-pointer rounded-lg border border-border-strong bg-background px-2.5 text-[13px] text-foreground focus:border-brand focus:outline-none"
-          >
-            {TIERS.map((tier) => (
-              <option key={tier.id} value={tier.id}>
-                {tier.name}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-            Drop to Starter to see bulk upload, scheduled jobs, Excel export and the assistant
-            lock.
-          </p>
-        </div>
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+        </form>
       </div>
     </div>
   );

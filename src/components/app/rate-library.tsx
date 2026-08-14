@@ -7,25 +7,25 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/field";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { usePrototype } from "@/components/app/prototype-context";
-import { CITIES, SOR_CATALOG, getCity } from "@/lib/data/reference";
+import { useSession } from "@/components/app/session-context";
+import type { City, SorEntry } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/utils";
 
-export function RateLibrary() {
-  const { cityId, setCityId } = usePrototype();
+export function RateLibrary({ entries, cities }: { entries: SorEntry[]; cities: City[] }) {
+  const { cityId, setCityId } = useSession();
   const [query, setQuery] = useState("");
   const [chapter, setChapter] = useState("all");
 
-  const city = getCity(cityId);
+  const city = cities.find((entry) => entry.id === cityId) ?? cities[0];
 
   const chapters = useMemo(
-    () => Array.from(new Set(SOR_CATALOG.map((entry) => entry.chapter))).sort(),
-    [],
+    () => Array.from(new Set(entries.map((entry) => entry.chapter))).sort(),
+    [entries],
   );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return SOR_CATALOG.filter((entry) => {
+    return entries.filter((entry) => {
       const matchesChapter = chapter === "all" || entry.chapter === chapter;
       const matchesQuery =
         q === "" ||
@@ -34,7 +34,7 @@ export function RateLibrary() {
         entry.source.toLowerCase().includes(q);
       return matchesChapter && matchesQuery;
     });
-  }, [query, chapter]);
+  }, [entries, query, chapter]);
 
   return (
     <>
@@ -70,7 +70,7 @@ export function RateLibrary() {
             onChange={(event) => setCityId(event.target.value)}
             aria-label="City for rate adjustment"
           >
-            {CITIES.map((entry) => (
+            {cities.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name} · ×{entry.indexFactor.toFixed(2)}
               </option>
@@ -156,7 +156,7 @@ export function RateLibrary() {
       </Card>
 
       <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-        Showing {rows.length} of {SOR_CATALOG.length} entries. The {city.name} column applies the
+        Showing {rows.length} of {entries.length} entries. The {city.name} column applies the
         city cost index (×{city.indexFactor.toFixed(2)}) to the base rate — this is the figure the
         variance engine benchmarks against for projects in that city.
       </p>

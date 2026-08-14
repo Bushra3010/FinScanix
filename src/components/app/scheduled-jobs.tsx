@@ -5,12 +5,12 @@ import { CircleAlert, Play, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { CRON_JOBS } from "@/lib/data/org";
+import type { CronJob } from "@/lib/types";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 
-export function ScheduledJobs() {
+export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(CRON_JOBS.map((job) => [job.id, job.enabled])),
+    Object.fromEntries(jobs.map((job) => [job.id, job.enabled])),
   );
   const [running, setRunning] = useState<string | null>(null);
 
@@ -21,7 +21,7 @@ export function ScheduledJobs() {
 
   return (
     <div className="space-y-4">
-      {CRON_JOBS.map((job) => {
+      {jobs.map((job) => {
         const on = enabled[job.id];
         return (
           <Card key={job.id}>

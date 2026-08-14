@@ -19,22 +19,12 @@ import { Can } from "@/components/app/gates";
 import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ANALYSED_INVOICES, getInvoice } from "@/lib/data/invoices";
+import { requireUser } from "@/lib/auth/guard";
+import { getInvoice } from "@/lib/db/queries";
+import type { AnalysedInvoice } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/utils";
 
-export function generateStaticParams() {
-  return ANALYSED_INVOICES.map((invoice) => ({ id: invoice.id }));
-}
-
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}): Promise<Metadata> {
-  const { id } = await params;
-  const invoice = getInvoice(id);
-  return { title: invoice ? `${invoice.number} · ${invoice.vendor}` : "Document" };
-}
+export const metadata: Metadata = { title: "Document" };
 
 export default async function InvoiceDetailPage({
   params,
@@ -42,7 +32,11 @@ export default async function InvoiceDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const invoice = getInvoice(id);
+  const user = await requireUser();
+
+  // Scoped to the tenant: another organisation's document id resolves to a 404
+  // rather than leaking that it exists.
+  const invoice = await getInvoice(user.organisation.id, id);
   if (!invoice) notFound();
 
   const processing = invoice.status === "extracting" || invoice.status === "queued";
@@ -143,9 +137,7 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
   );
 }
 
-function RejectedPanel({ invoice }: { invoice: ReturnType<typeof getInvoice> }) {
-  if (!invoice) return null;
-
+function RejectedPanel({ invoice }: { invoice: AnalysedInvoice }) {
   return (
     <Card className="border-over/40">
       <CardHeader className="bg-over-soft/50">

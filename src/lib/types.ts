@@ -258,6 +258,22 @@ export interface CronJob {
   enabled: boolean;
 }
 
+/** The signed-in user, resolved from the session cookie on every request. */
+export interface SessionUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  status: "active" | "invited" | "suspended";
+  organisation: {
+    id: string;
+    name: string;
+    gstin: string;
+    defaultCityId: string;
+    subscription: Subscription;
+  };
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";

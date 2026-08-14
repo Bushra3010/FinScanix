@@ -6,7 +6,7 @@ import { Bot, Lock, MessageCircle, Send, ShieldAlert, Sparkles, X } from "lucide
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { answerInDomain, classifyDomain, OUT_OF_DOMAIN_REPLY } from "@/lib/assistant";
-import { usePrototype } from "@/components/app/prototype-context";
+import { useSession } from "@/components/app/session-context";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/types";
 
@@ -19,7 +19,7 @@ const SUGGESTIONS = [
 
 /** FR-10.1 — available across the platform; FR-10.2/10.3 — domain restricted. */
 export function AssistantWidget() {
-  const { entitled } = usePrototype();
+  const { entitled } = useSession();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");

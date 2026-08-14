@@ -1,28 +1,38 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/app/page-parts";
+import { AccessDenied } from "@/components/app/access-denied";
 import { BillingPanel } from "@/components/app/billing-panel";
-import type { TierId } from "@/lib/types";
+import { gateFor, requireUser } from "@/lib/auth/guard";
+import { countActiveSeats } from "@/lib/db/queries";
 
 export const metadata: Metadata = { title: "Billing" };
 
-const VALID_TIERS: TierId[] = ["starter", "professional", "enterprise"];
+export default async function BillingPage() {
+  const user = await requireUser();
+  const gate = gateFor(user);
 
-export default async function BillingPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ checkout?: string; tier?: string }>;
-}) {
-  const { checkout, tier } = await searchParams;
-  const activated =
-    checkout === "mock" && VALID_TIERS.includes(tier as TierId) ? (tier as TierId) : undefined;
+  const header = (
+    <PageHeader
+      title="Billing"
+      description="Your subscription, usage against plan limits, and payment history. Limits are enforced server-side, so the interface and the entitlement never disagree."
+    />
+  );
+
+  if (!gate.allows("billing.manage")) {
+    return (
+      <>
+        {header}
+        <AccessDenied message="Billing is visible to the account owner only. Ask them to review the plan or invoices." />
+      </>
+    );
+  }
+
+  const seatsUsed = await countActiveSeats(user.organisation.id);
 
   return (
     <>
-      <PageHeader
-        title="Billing"
-        description="Your subscription, usage against plan limits, and payment history. Limits are enforced server-side, so the interface and the entitlement never disagree."
-      />
-      <BillingPanel checkoutTier={activated} />
+      {header}
+      <BillingPanel seatsUsed={seatsUsed} />
     </>
   );
 }

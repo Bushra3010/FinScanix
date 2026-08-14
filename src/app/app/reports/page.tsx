@@ -7,7 +7,8 @@ import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/ca
 import { Badge } from "@/components/ui/badge";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { VariancePct } from "@/components/variance-badge";
-import { REPORTED_INVOICES } from "@/lib/data/invoices";
+import { requireUser } from "@/lib/auth/guard";
+import { listReportedInvoices } from "@/lib/db/queries";
 import { formatDate, formatINR } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Reports" };
@@ -51,9 +52,15 @@ const GENERATED = [
   },
 ];
 
-export default function ReportsPage() {
+export default async function ReportsPage() {
+  const user = await requireUser();
+  const reportedInvoices = await listReportedInvoices(user.organisation.id);
+
+  const projects = [...new Set(reportedInvoices.map((invoice) => invoice.project))];
+  const vendors = [...new Set(reportedInvoices.map((invoice) => invoice.vendor))];
+
   const byProject = Object.values(
-    REPORTED_INVOICES.reduce<
+    reportedInvoices.reduce<
       Record<
         string,
         {
@@ -87,7 +94,7 @@ export default function ReportsPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.6fr]">
-        <ReportBuilder />
+        <ReportBuilder projects={projects} vendors={vendors} />
 
         <div className="space-y-6">
           <Card>

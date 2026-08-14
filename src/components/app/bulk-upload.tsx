@@ -6,9 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { RATE_UPLOADS } from "@/lib/data/org";
-import { formatDate } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import type { RateUpload } from "@/lib/types";
+import { cn, formatDate } from "@/lib/utils";
 
 const REQUIRED_COLUMNS = [
   { name: "code", note: "Unique rate code, e.g. DSR 13.1.2" },
@@ -27,7 +26,7 @@ MAT-CEM 1.1,"Ordinary Portland Cement 53 grade conforming to IS 12269, supplied 
 
 type Phase = "idle" | "validating" | "done";
 
-export function BulkRateUpload() {
+export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [fileName, setFileName] = useState("");
@@ -207,7 +206,7 @@ export function BulkRateUpload() {
               </tr>
             </THead>
             <TBody>
-              {RATE_UPLOADS.map((upload) => (
+              {uploads.map((upload) => (
                 <TR key={upload.id}>
                   <TD>
                     <p className="text-[13px] font-medium text-foreground">{upload.fileName}</p>

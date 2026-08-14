@@ -5,8 +5,9 @@ import { PageHeader } from "@/components/app/page-parts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { FieldHint, Input, Label, Select } from "@/components/ui/field";
-import { CITIES } from "@/lib/data/reference";
-import { CURRENT_USER, ORGANISATION, ROLE_LABEL } from "@/lib/data/org";
+import { requireUser } from "@/lib/auth/guard";
+import { listCities } from "@/lib/db/queries";
+import { ROLE_LABEL } from "@/lib/data/org";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -19,7 +20,10 @@ const NOTIFICATIONS = [
   { id: "digest", label: "Weekly variance digest", default: false },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const user = await requireUser();
+  const cities = await listCities();
+
   return (
     <>
       <PageHeader
@@ -38,15 +42,15 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <Label htmlFor="profile-name">Full name</Label>
-              <Input id="profile-name" defaultValue={CURRENT_USER.name} />
+              <Input id="profile-name" defaultValue={user.name} />
             </div>
             <div>
               <Label htmlFor="profile-email">Work email</Label>
-              <Input id="profile-email" type="email" defaultValue={CURRENT_USER.email} />
+              <Input id="profile-email" type="email" defaultValue={user.email} />
             </div>
             <div>
               <Label htmlFor="profile-role">Role</Label>
-              <Input id="profile-role" defaultValue={ROLE_LABEL[CURRENT_USER.role]} disabled />
+              <Input id="profile-role" defaultValue={ROLE_LABEL[user.role]} disabled />
               <FieldHint>
                 Roles are assigned by an account owner from{" "}
                 <Link href="/app/settings/team" className="text-brand hover:underline">
@@ -74,16 +78,16 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <Label htmlFor="org-name">Organisation name</Label>
-              <Input id="org-name" defaultValue={ORGANISATION.name} />
+              <Input id="org-name" defaultValue={user.organisation.name} />
             </div>
             <div>
               <Label htmlFor="org-gstin">GSTIN</Label>
-              <Input id="org-gstin" defaultValue={ORGANISATION.gstin} className="font-mono" />
+              <Input id="org-gstin" defaultValue={user.organisation.gstin} className="font-mono" />
             </div>
             <div>
               <Label htmlFor="org-city">Default project city</Label>
-              <Select id="org-city" defaultValue={ORGANISATION.defaultCityId}>
-                {CITIES.map((city) => (
+              <Select id="org-city" defaultValue={user.organisation.defaultCityId}>
+                {cities.map((city) => (
                   <option key={city.id} value={city.id}>
                     {city.name}, {city.state} — index {city.indexFactor.toFixed(2)}
                   </option>

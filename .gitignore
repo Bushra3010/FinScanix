@@ -29,6 +29,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
+# local database — never commit tenant data
+*.db
+*.db-journal
+prisma/dev.db*
+
 # editor
 .idea/
 .vscode/
