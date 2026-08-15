@@ -118,9 +118,10 @@ export default function LandingPage() {
                 Built for construction & facilities procurement
               </Badge>
 
+              {/* Two sentences, each kept on its own line at every breakpoint. */}
               <h1 className="text-4xl leading-[1.08] font-semibold tracking-tight text-balance text-foreground sm:text-5xl lg:text-[3.4rem]">
-                Know what every line item{" "}
-                <span className="text-brand">should actually cost.</span>
+                <span className="block">Audit Every Invoice &amp; Quotation.</span>
+                <span className="block text-brand">Control Every Cost.</span>
               </h1>
 
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
