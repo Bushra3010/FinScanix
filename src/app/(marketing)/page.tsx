@@ -1,11 +1,14 @@
 import Link from "next/link";
 import {
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Bot,
   Check,
-  CircleCheck,
+  CirclePlay,
   Clock,
   Database,
+  Equal,
   FileSpreadsheet,
   FileText,
   Gauge,
@@ -16,20 +19,37 @@ import {
   ScanLine,
   Search,
   ShieldCheck,
-  Sparkles,
+  Target,
   TrendingUp,
   Users,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
-import { InvoicePreview } from "@/components/marketing/invoice-preview";
-import {
-  HeroStats,
-  ProcessRail,
-  SavingsImpactPanel,
-  TrustBar,
-  VarianceEnginePanel,
-} from "@/components/marketing/hero-panels";
+import { AppWindow } from "@/components/marketing/app-window";
+import { HeroIllustration } from "@/components/marketing/hero-illustration";
+import { getInvoice } from "@/lib/data/invoices";
 import { VARIANCE_CONFIG } from "@/lib/variance";
+import { cn, formatINR } from "@/lib/utils";
+
+/** The three assurances beside the hero CTAs. */
+const heroChips: { icon: LucideIcon; title: string; body: string; tone: string }[] = [
+  { icon: ShieldCheck, title: "Audit-ready", body: "evidence", tone: "text-brand" },
+  { icon: Zap, title: "Live pricing", body: "updates", tone: "text-par" },
+  { icon: Target, title: "Benchmark", body: "accuracy", tone: "text-under" },
+];
+
+/** Where the benchmark comes from — shown in place of customer logos. */
+const sources: { name: string; kind: string }[] = [
+  { name: "CPWD DSR", kind: "Government rate book" },
+  { name: "State PWD", kind: "State schedules" },
+  { name: "IndiaMART", kind: "B2B marketplace" },
+  { name: "Moglix", kind: "B2B marketplace" },
+  { name: "TradeIndia", kind: "B2B marketplace" },
+];
+
+/** Sample invoice the hero figures are drawn from. */
+const sample = getInvoice("inv-0842");
 
 const steps = [
   {
@@ -114,94 +134,126 @@ export default function LandingPage() {
   return (
     <>
       {/* Hero */}
-      <section className="px-5 pt-10 pb-6 sm:px-8 lg:px-10">
-        <div className="mx-auto w-full max-w-[88rem]">
-          <div className="grid items-start gap-10 lg:grid-cols-[1fr_1.12fr] lg:gap-12">
+      <section className="relative overflow-hidden">
+        <div className="hero-swoosh pointer-events-none absolute inset-0" aria-hidden />
+
+        <div className="relative mx-auto w-full max-w-7xl px-5 pt-14 pb-14 lg:px-8">
+          <div className="grid items-start gap-12 lg:grid-cols-[0.92fr_1.22fr] lg:gap-10">
             {/* Left column */}
             <div className="animate-fade-up">
-              <span className="inline-flex items-center gap-2 rounded-full bg-brand-soft px-3.5 py-1.5 text-[11.5px] font-semibold tracking-wider text-brand-soft-foreground uppercase">
-                <Sparkles className="h-3.5 w-3.5" />
-                AI-powered procurement intelligence
+              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-[13.5px] font-medium text-brand shadow-card">
+                <HardHat className="h-4 w-4" />
+                Built for construction &amp; facilities procurement
               </span>
 
-              {/* Two sentences, each kept on its own line at every breakpoint. */}
-              <h1 className="mt-5 text-[2.6rem] leading-[1.06] font-semibold tracking-tight text-foreground sm:text-5xl lg:text-[3.5rem]">
-                <span className="block">Audit Every</span>
-                <span className="block">Invoice &amp; Quotation.</span>
-                <span className="block text-brand">Control Every Cost.</span>
+              <h1 className="mt-7 text-[2.9rem] leading-[1.04] font-bold tracking-tight text-foreground sm:text-[3.4rem]">
+                <span className="block">Smarter rates.</span>
+                <span className="block text-brand">Stronger bids.</span>
               </h1>
 
-              <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
-                FinScanix is an AI-powered procurement intelligence that analyzes vendor
-                invoices and quotations, benchmarks line items against government Schedule
-                of Rates and live local market pricing and flags overcharges to drive
-                data-driven decision making, scope validation, risk mitigation and cost
-                savings — before you approve.
+              <p className="mt-5 max-w-md text-[17px] leading-relaxed text-muted-foreground">
+                Real-time rate verification. Live market pricing. Audit-ready evidence.
               </p>
 
-              <div className="mt-7">
-                <ProcessRail />
-              </div>
-
-              <div className="mt-7 flex flex-wrap items-center gap-3">
-                <Link href="/register" className={buttonStyles({ size: "lg" })}>
-                  Start 14-day free trial
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Link
+                  href="/register"
+                  className={buttonStyles({ size: "lg", className: "h-12 rounded-xl px-6" })}
+                >
+                  Start free trial
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
-                  href="/app/invoices/inv-0842"
-                  className={buttonStyles({ variant: "outline", size: "lg" })}
+                  href="/#how-it-works"
+                  className={buttonStyles({
+                    variant: "outline",
+                    size: "lg",
+                    className: "h-12 rounded-xl px-6",
+                  })}
                 >
-                  <FileText className="h-4 w-4" />
-                  See a sample report
+                  <CirclePlay className="h-4.5 w-4.5 text-brand" />
+                  See how it works
                 </Link>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-muted-foreground">
-                {["No card required", "Cancel anytime", "Setup in 2 mins"].map((item) => (
-                  <span key={item} className="inline-flex items-center gap-1.5">
-                    <CircleCheck className="h-3.5 w-3.5 text-par" />
-                    {item}
-                  </span>
+              <div className="mt-8 flex flex-wrap items-center gap-x-7 gap-y-4">
+                {heroChips.map((chip) => (
+                  <div key={chip.title} className="flex items-center gap-2.5">
+                    <span
+                      className={cn(
+                        "flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-surface shadow-card",
+                        chip.tone,
+                      )}
+                    >
+                      <chip.icon className="h-5 w-5" />
+                    </span>
+                    <span className="text-[13.5px] leading-tight">
+                      <span className="block font-semibold text-foreground">{chip.title}</span>
+                      <span className="block text-muted-foreground">{chip.body}</span>
+                    </span>
+                  </div>
                 ))}
               </div>
+
+              <HeroIllustration className="mt-10 max-w-lg" />
             </div>
 
             {/* Right column */}
             <div className="animate-fade-up">
-              <InvoicePreview />
-            </div>
-          </div>
+              <AppWindow />
 
-          {/* Lower band: stats, engine, savings */}
-          <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_1.12fr] lg:gap-12">
-            <HeroStats />
-            <div className="grid gap-4 sm:grid-cols-[1.35fr_1fr]">
-              <VarianceEnginePanel />
-              <SavingsImpactPanel />
-            </div>
-          </div>
+              {/* Figures lifted out of the window, as in the design. */}
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <div className="rounded-xl border border-border bg-surface px-4 py-3 shadow-card">
+                  <p className="text-[12.5px] text-muted-foreground">Recoverable on this bill</p>
+                  <p className="tnum text-xl font-semibold text-over">
+                    {sample ? formatINR(sample.summary.potentialSaving, { compact: true }) : "—"}
+                  </p>
+                </div>
 
-          <div className="mt-10">
-            <TrustBar />
+                {sample && (
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Tally
+                      count={sample.summary.overCount}
+                      label="Over-priced"
+                      tone="over"
+                      icon={ArrowUp}
+                    />
+                    <Tally count={sample.summary.parCount} label="At par" tone="par" icon={Equal} />
+                    <Tally
+                      count={sample.summary.underCount}
+                      label="Under-priced"
+                      tone="under"
+                      icon={ArrowDown}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Sources strip */}
-      <section className="border-b border-border">
-        <div className="mx-auto w-full max-w-7xl px-5 py-6 lg:px-8">
-          <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-[13px] text-muted-foreground">
-            <span className="font-medium text-foreground">Benchmarked against</span>
-            <span>CPWD DSR 2023</span>
-            <span className="hidden text-border-strong sm:inline">•</span>
-            <span>State PWD schedules</span>
-            <span className="hidden text-border-strong sm:inline">•</span>
-            <span>IndiaMART</span>
-            <span className="hidden text-border-strong sm:inline">•</span>
-            <span>Moglix</span>
-            <span className="hidden text-border-strong sm:inline">•</span>
-            <span>TradeIndia</span>
+      {/*
+        The design placed customer logos here. Until there are named customers
+        who have agreed to be listed, this band shows the rate sources the
+        product actually benchmarks against — provenance rather than borrowed
+        credibility, and the stronger claim for this product anyway.
+      */}
+      <section className="border-y border-border bg-background">
+        <div className="mx-auto w-full max-w-7xl px-5 py-9 lg:px-8">
+          <p className="text-center text-[13.5px] text-muted-foreground">
+            Benchmarked against official rate books and live market sources
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-10 gap-y-5">
+            {sources.map((source) => (
+              <div key={source.name} className="text-center">
+                <p className="text-[15px] font-semibold tracking-tight text-foreground/75">
+                  {source.name}
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">{source.kind}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -463,6 +515,37 @@ export default function LandingPage() {
         </div>
       </section>
     </>
+  );
+}
+
+function Tally({
+  count,
+  label,
+  tone,
+  icon: Icon,
+}: {
+  count: number;
+  label: string;
+  tone: "over" | "par" | "under";
+  icon: LucideIcon;
+}) {
+  const styles = {
+    over: "border-over/25 bg-over-soft/50 text-over",
+    par: "border-par/25 bg-par-soft/50 text-par",
+    under: "border-under/25 bg-under-soft/50 text-under",
+  }[tone];
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-xl border bg-surface px-3.5 py-2.5 shadow-card",
+        styles,
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      <span className="tnum text-[13.5px] font-semibold">{count}</span>
+      <span className="text-[13px] text-foreground">{label}</span>
+    </span>
   );
 }
 

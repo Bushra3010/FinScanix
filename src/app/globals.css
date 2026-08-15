@@ -206,6 +206,26 @@
       );
   }
 
+  /* Soft tinted curves behind the hero. */
+  .hero-swoosh {
+    background-image:
+      radial-gradient(
+        58rem 40rem at 86% -12%,
+        color-mix(in oklab, var(--brand) 11%, transparent),
+        transparent 62%
+      ),
+      radial-gradient(
+        38rem 30rem at -6% 78%,
+        color-mix(in oklab, var(--brand) 9%, transparent),
+        transparent 64%
+      ),
+      radial-gradient(
+        30rem 24rem at 55% 108%,
+        color-mix(in oklab, var(--brand) 6%, transparent),
+        transparent 60%
+      );
+  }
+
   /* Fine dot field used in the canvas margins. */
   .dot-grid {
     background-image: radial-gradient(
