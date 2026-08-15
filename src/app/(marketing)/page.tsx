@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Bot,
   Check,
+  CircleCheck,
   Clock,
   Database,
   FileSpreadsheet,
@@ -20,9 +21,14 @@ import {
   Users,
 } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ReportPreview } from "@/components/marketing/report-preview";
-import { CITIES, SOR_CATALOG } from "@/lib/data/reference";
+import { InvoicePreview } from "@/components/marketing/invoice-preview";
+import {
+  HeroStats,
+  ProcessRail,
+  SavingsImpactPanel,
+  TrustBar,
+  VarianceEnginePanel,
+} from "@/components/marketing/hero-panels";
 import { VARIANCE_CONFIG } from "@/lib/variance";
 
 const steps = [
@@ -108,23 +114,24 @@ export default function LandingPage() {
   return (
     <>
       {/* Hero */}
-      <section className="relative overflow-hidden border-b border-border">
-        <div className="surface-grid pointer-events-none absolute inset-0 opacity-60" aria-hidden />
-        <div className="relative mx-auto w-full max-w-7xl px-5 pt-16 pb-20 lg:px-8 lg:pt-24">
-          <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+      <section className="px-5 pt-10 pb-6 sm:px-8 lg:px-10">
+        <div className="mx-auto w-full max-w-[88rem]">
+          <div className="grid items-start gap-10 lg:grid-cols-[1fr_1.12fr] lg:gap-12">
+            {/* Left column */}
             <div className="animate-fade-up">
-              <Badge tone="brand" className="mb-5">
-                <Sparkles className="h-3 w-3" />
-                Built for construction & facilities procurement
-              </Badge>
+              <span className="inline-flex items-center gap-2 rounded-full bg-brand-soft px-3.5 py-1.5 text-[11.5px] font-semibold tracking-wider text-brand-soft-foreground uppercase">
+                <Sparkles className="h-3.5 w-3.5" />
+                AI-powered procurement intelligence
+              </span>
 
               {/* Two sentences, each kept on its own line at every breakpoint. */}
-              <h1 className="text-4xl leading-[1.08] font-semibold tracking-tight text-balance text-foreground sm:text-5xl lg:text-[3.4rem]">
-                <span className="block">Audit Every Invoice &amp; Quotation.</span>
+              <h1 className="mt-5 text-[2.6rem] leading-[1.06] font-semibold tracking-tight text-foreground sm:text-5xl lg:text-[3.5rem]">
+                <span className="block">Audit Every</span>
+                <span className="block">Invoice &amp; Quotation.</span>
                 <span className="block text-brand">Control Every Cost.</span>
               </h1>
 
-              <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
+              <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
                 FinScanix is an AI-powered procurement intelligence that analyzes vendor
                 invoices and quotations, benchmarks line items against government Schedule
                 of Rates and live local market pricing and flags overcharges to drive
@@ -132,43 +139,57 @@ export default function LandingPage() {
                 savings — before you approve.
               </p>
 
-              <div className="mt-8 flex flex-wrap items-center gap-3">
+              <div className="mt-7">
+                <ProcessRail />
+              </div>
+
+              <div className="mt-7 flex flex-wrap items-center gap-3">
                 <Link href="/register" className={buttonStyles({ size: "lg" })}>
-                  Start free trial
+                  Start 14-day free trial
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
                   href="/app/invoices/inv-0842"
                   className={buttonStyles({ variant: "outline", size: "lg" })}
                 >
+                  <FileText className="h-4 w-4" />
                   See a sample report
                 </Link>
               </div>
 
-              <p className="mt-4 text-[13px] text-muted-foreground">
-                14-day trial · No card required · Cancel anytime
-              </p>
-
-              <dl className="mt-10 grid max-w-lg grid-cols-2 gap-x-6 gap-y-5 border-t border-border pt-8 sm:grid-cols-4">
-                <Stat value={`${SOR_CATALOG.length}+`} label="SoR items seeded" />
-                <Stat value={`${CITIES.length}`} label="City cost indices" />
-                <Stat value={`±${VARIANCE_CONFIG.parBandPct}%`} label="Par band" />
-                <Stat value="4" label="Pricing sources" />
-              </dl>
+              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-muted-foreground">
+                {["No card required", "Cancel anytime", "Setup in 2 mins"].map((item) => (
+                  <span key={item} className="inline-flex items-center gap-1.5">
+                    <CircleCheck className="h-3.5 w-3.5 text-par" />
+                    {item}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div className="animate-fade-up lg:pl-4">
-              <ReportPreview />
-              <p className="mt-3 text-center text-xs text-muted-foreground">
-                Live output from the variance engine on a sample RA bill.
-              </p>
+            {/* Right column */}
+            <div className="animate-fade-up">
+              <InvoicePreview />
             </div>
+          </div>
+
+          {/* Lower band: stats, engine, savings */}
+          <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_1.12fr] lg:gap-12">
+            <HeroStats />
+            <div className="grid gap-4 sm:grid-cols-[1.35fr_1fr]">
+              <VarianceEnginePanel />
+              <SavingsImpactPanel />
+            </div>
+          </div>
+
+          <div className="mt-10">
+            <TrustBar />
           </div>
         </div>
       </section>
 
-      {/* Trust strip */}
-      <section className="border-b border-border bg-surface">
+      {/* Sources strip */}
+      <section className="border-b border-border">
         <div className="mx-auto w-full max-w-7xl px-5 py-6 lg:px-8">
           <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-[13px] text-muted-foreground">
             <span className="font-medium text-foreground">Benchmarked against</span>
@@ -442,16 +463,6 @@ export default function LandingPage() {
         </div>
       </section>
     </>
-  );
-}
-
-function Stat({ value, label }: { value: string; label: string }) {
-  return (
-    <div>
-      <dt className="sr-only">{label}</dt>
-      <dd className="tnum text-2xl font-semibold tracking-tight text-foreground">{value}</dd>
-      <p className="mt-0.5 text-[12.5px] text-muted-foreground">{label}</p>
-    </div>
   );
 }
 
