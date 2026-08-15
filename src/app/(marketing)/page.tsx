@@ -125,10 +125,11 @@ export default function LandingPage() {
               </h1>
 
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
-                FinScanix reads your vendor invoices and quotations, benchmarks every line
-                against the government Schedule of Rates and live market pricing for your
-                city, and flags exactly where you are being overcharged — with the evidence
-                attached.
+                FinScanix is an AI-powered procurement intelligence that analyzes vendor
+                invoices and quotations, benchmarks line items against government Schedule
+                of Rates and live local market pricing and flags overcharges to drive
+                data-driven decision making, scope validation, risk mitigation and cost
+                savings — before you approve.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
