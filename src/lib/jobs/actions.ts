@@ -19,7 +19,7 @@ export async function runJobNowAction(formData: FormData): Promise<JobActionStat
   const id = String(formData.get("id") ?? "");
   const job = await prisma.cronJob.findFirst({
     where: { id, organisationId: user.organisation.id },
-    select: { id: true, organisationId: true, name: true, schedule: true, kind: true },
+    select: { id: true, organisationId: true, name: true, schedule: true, kind: true, scope: true },
   });
   if (!job) return { error: "That job is not in your organisation." };
 

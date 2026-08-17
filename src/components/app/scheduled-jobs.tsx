@@ -49,6 +49,12 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
                   {!job.enabled && <Badge tone="outline">Paused</Badge>}
                 </div>
                 <CardDescription>{job.target}</CardDescription>
+                {job.scope.length > 0 && (
+                  <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                    Matches line items or rate chapters containing:{" "}
+                    <span className="font-mono text-foreground">{job.scope.join(", ")}</span>
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center gap-2">

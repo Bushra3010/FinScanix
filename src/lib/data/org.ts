@@ -387,6 +387,7 @@ export const RATE_UPLOADS: RateUpload[] = [
 export const CRON_JOBS: CronJob[] = [
   {
     id: "cron-01",
+    scope: ["cement", "steel", "aggregate", "concrete", "brick", "masonry", "tile", "plaster", "sand"],
     kind: "price_refresh",
     name: "Market price refresh — core materials",
     schedule: "0 3 * * *",
@@ -399,6 +400,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-02",
+    scope: ["light", "luminaire", "switch", "cable", "wire", "conduit", "plumb", "sanitary", "fixture", "fitting", "pipe", "tap", "valve"],
     kind: "price_refresh",
     name: "Market price refresh — E&M and fittings",
     schedule: "0 4 * * 1,4",
@@ -411,6 +413,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-03",
+    scope: [],
     kind: "sor_revision",
     name: "SoR revision check",
     schedule: "0 6 1 * *",
@@ -423,6 +426,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-04",
+    scope: [],
     kind: "stale_sweep",
     name: "Stale price sweep",
     schedule: "30 2 * * 0",

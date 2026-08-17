@@ -307,6 +307,7 @@ export async function listCronJobs(organisationId: string): Promise<CronJob[]> {
     schedule: row.schedule,
     target: row.target,
     kind: row.kind as CronJob["kind"],
+    scope: row.scope ? row.scope.split(",").filter(Boolean) : [],
     lastRun: row.lastRun.toISOString(),
     nextRun: row.nextRun.toISOString(),
     lastStatus: row.lastStatus as CronJob["lastStatus"],

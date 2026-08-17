@@ -285,6 +285,8 @@ model CronJob {
   schedule       String
   target         String
   kind           String   @default("price_refresh")
+  /// Comma-separated keywords limiting which lines this job touches; null = all.
+  scope          String?
   lastRun        DateTime
   nextRun        DateTime
   lastStatus     String

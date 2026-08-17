@@ -260,6 +260,8 @@ export interface CronJob {
   target: string;
   /** Which routine this job runs — the runner dispatches on it. */
   kind: CronKind;
+  /** Keywords limiting which lines the job touches; empty = everything. */
+  scope: string[];
   lastRun: string;
   nextRun: string;
   lastStatus: "success" | "partial" | "failed";

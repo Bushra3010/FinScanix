@@ -7,10 +7,11 @@ reported as **over-priced, under-priced or at par** with the evidence attached.
 
 Built to the [FinScanix PRD](./FinScanix_PRD.md).
 
-> **Status.** Every screen is built and navigable, backed by a real database and
-> real session authentication with server-enforced roles. The *verification
-> pipeline* — OCR, live pricing, payments — still runs on mocks behind adapter
-> interfaces. See [What is real vs mocked](#what-is-real-vs-mocked).
+> **Status.** Feature-complete against the PRD and deployed. Documents are
+> really uploaded, stored, parsed, matched and priced; every action on every
+> screen writes to the database. Four integrations are code-complete but
+> inactive because their credentials are not set on this deployment — see
+> [What is real, and what is waiting on a key](#what-is-real-and-what-is-waiting-on-a-key).
 
 ---
 
@@ -18,9 +19,10 @@ Built to the [FinScanix PRD](./FinScanix_PRD.md).
 
 <https://finscanix-production.up.railway.app>
 
-Running on Railway: a `finscanix` web service and a dedicated `finscanix-db`
-Postgres, both in the `harmonious-simplicity` project. Migrations run on every
-release via the start command in [railway.json](./railway.json).
+Running on Railway (`finscanix` web service in the `harmonious-simplicity`
+project) against **Supabase Postgres** for data and **Supabase Storage** for the
+uploaded documents themselves. Migrations run on every release via the start
+command in [railway.json](./railway.json).
 
 The deployment is seeded with the demo dataset. Its sign-in password is **not**
 the one below — it was set separately via `SEED_PASSWORD` so a public URL does
@@ -38,9 +40,14 @@ npm install
 cp .env.example .env
 ```
 
-Point `DATABASE_URL` at a Postgres instance. There is no local SQLite fallback:
-the deployment target's filesystem is ephemeral, so the schema targets Postgres
+Point `DATABASE_URL` at a Postgres instance. There is no SQLite fallback: the
+deployment target's filesystem is ephemeral, so the schema targets Postgres
 everywhere to keep dev and production honest.
+
+Against Supabase, `DATABASE_URL` is the **transaction pooler** (port 6543, with
+`pgbouncer=true`) and `DIRECT_URL` is the **session pooler** (port 5432) used
+only by Prisma Migrate. The pooler is not optional in deployment: Supabase's
+direct endpoint is IPv6-only and most container platforms egress IPv4.
 
 ```bash
 npx prisma migrate dev
@@ -54,8 +61,7 @@ npm run db:seed
 npm run dev
 ```
 
-Then open <http://localhost:3000>. SQLite is used locally, so there is no
-database server to install.
+Then open <http://localhost:3000>.
 
 ### Demo accounts
 
@@ -90,18 +96,13 @@ development fixtures — they do not exist outside your local database.
 |---|---|---|
 | Framework | Next.js 15 (App Router) + React 19 | One codebase for marketing site, app and server actions. |
 | Language | TypeScript (strict) | The domain model is the contract between the data layer and every screen. |
-| Database | Prisma + SQLite (dev) | No server to install locally. Postgres-portable — see below. |
+| Database | Prisma + Supabase Postgres | One engine in dev and production; Supavisor pooling for container runtimes. |
+| File storage | Supabase Storage over the REST API | Keyed `<org>/<invoice>/<file>`, so deletion is a safe prefix operation. Called with `fetch`, not `@supabase/supabase-js`, whose realtime client needs a `WebSocket` global Node 20 does not have. |
+| Documents | `unpdf` text layer, Claude vision for scans | The text layer is exact where it exists; OCR is the fallback, and says so. |
+| Exports | `exceljs`, `pdfkit` | Both declared in `serverExternalPackages` — webpack otherwise rewrites pdfkit's font paths and it cannot find Helvetica at runtime. |
 | Auth | Hand-rolled sessions, scrypt hashing | No dependency, no JWT revocation problem; sessions are rows, so sign-out really signs out. |
 | Styling | Tailwind CSS v4 with CSS-variable tokens | Light/dark from one token set. |
 | Charts | Hand-built SVG | Simple shapes; no charting dependency, colours bound to the theme tokens. |
-
-### Moving to Postgres
-
-Change `provider` in [prisma/schema.prisma](prisma/schema.prisma) from `sqlite`
-to `postgresql`, point `DATABASE_URL` at the instance, and re-run
-`prisma migrate dev`. The schema uses no SQLite-only features: enum-like columns
-are plain strings (documented against the TypeScript unions), and there are no
-JSON or array columns.
 
 ---
 
@@ -125,6 +126,14 @@ src/
     assistant.ts        domain guard for the AI assistant
     auth/               password hashing, sessions, RBAC guards, actions
     db/                 Prisma client and the query layer
+    extraction/         PDF text-layer parser, Claude vision OCR
+    matching/           invoice line -> Schedule of Rates matcher
+    pipeline/ingest.ts  upload -> gate -> store -> extract -> match -> price
+    storage/            Supabase Storage over plain REST
+    jobs/               cron reader, job runner, admin actions
+    invoices/           upload, correction, deletion actions
+    rates/              rate CRUD and CSV bulk import
+    org/                team and organisation actions
     billing/            subscription actions
     adapters/           external-service interfaces + mock and live impls
     data/               reference config and the seed source
@@ -171,49 +180,95 @@ locked while the data sits in the RSC payload. There is a check for this in
 
 ---
 
-## What is real vs mocked
+## What is real, and what is waiting on a key
 
-**Real, working:**
+**Working end to end, verified against the deployment:**
 
-- **Persistence.** Everything is read from the database through
-  [lib/db/queries.ts](src/lib/db/queries.ts), which maps rows back to the types
-  in `types.ts`. Every query is scoped by `organisationId`, so tenant isolation
-  is enforced in one place rather than left to callers.
-- **Authentication.** Registration and login hash with scrypt (memory-hard,
-  from Node's standard library — no native dependency). Sessions are database
-  rows; only the SHA-256 of the token is stored, so a database leak cannot be
-  replayed. Unknown emails still run a verify against a dummy hash so response
-  timing does not reveal which addresses are registered.
-- **Role-based access control**, enforced server-side before any query runs.
-- **The variance engine** — every figure on every screen is computed by it.
-- **The assistant's domain guard.** Off-domain questions return the exact
-  required string, verbatim. Answers themselves are canned.
-- **Live recalculation** — correcting a line item's rate re-runs the engine and
-  updates the verdict and roll-up immediately.
-- **Subscription changes** write to the database, so entitlements move across
-  the whole app at once.
+- **Ingestion.** A PDF is checked at the quality gate, stored in Supabase
+  Storage, parsed for its text layer, matched to the Schedule of Rates with a
+  city-index adjustment, and priced — one pass, in
+  [pipeline/ingest.ts](src/lib/pipeline/ingest.ts). The file is stored *before*
+  extraction, so a parsing failure still leaves the original recoverable, and
+  the gate runs before both, so a rejected file consumes neither storage nor
+  quota.
+- **Extraction.** [extraction/pdf.ts](src/lib/extraction/pdf.ts) reads the real
+  text layer and reconciles each row arithmetically — quantity x rate should
+  equal amount. Rows that reconcile carry high confidence; rows that do not are
+  flagged for review rather than quietly trusted.
+- **SoR matching.** Token containment, Jaccard and trigram similarity, plus unit
+  agreement, over the tenant's rates and the shared book together.
+- **Persistence.** Line corrections, document deletion, rate CRUD, CSV bulk
+  import, team management and organisation settings all write to the database.
+- **Authentication.** scrypt hashing (memory-hard, Node standard library, no
+  native dependency). Sessions are database rows storing only the SHA-256 of the
+  token, so a database leak cannot be replayed. Unknown emails still run a
+  verify against a dummy hash, so response timing does not reveal which
+  addresses are registered.
+- **Role-based access control**, checked *before* the query runs — so restricted
+  rows never enter the server-rendered payload, not merely the screen.
+- **The variance engine** — every figure on every screen is computed by it, and
+  correcting a line re-runs it immediately.
+- **Exports.** Real PDF and XLSX files, generated server-side.
+- **Scheduled jobs.** A five-field cron reader evaluated in IST, a runner for
+  price refresh / stale sweep / rate-book revision checks, and a
+  bearer-authenticated `/api/cron` endpoint that runs whatever is due.
 
-**Mocked behind an interface** ([src/lib/adapters/](src/lib/adapters/)):
+**Code-complete, but inactive without a credential** — each is selected by
+credential availability in [adapters/index.ts](src/lib/adapters/index.ts), so
+setting the variable switches that one service live and a missing key degrades
+to the mock rather than failing a request:
 
-| Service | PRD | Mock | Live seam |
+| Service | PRD | Without the key | With it |
 |---|---|---|---|
-| Quality gate | FR-1.2 | Heuristic classifier | Model-backed classifier |
-| OCR / extraction | FR-2.1 | Fixture replay | Vision model |
-| Market pricing | FR-4.1 | Synthesised quotes around the SoR baseline | Serper (`SERPER_API_KEY`) |
-| Payments | FR-8.2 | Applies the change directly, no card fields anywhere | Razorpay (`RAZORPAY_KEY_*`) |
-| Assistant | FR-10 | Domain guard + canned answers | Claude (`ANTHROPIC_API_KEY`) |
+| Market pricing | FR-4.1 | Quotes synthesised around the SoR baseline | Serper shopping search, India-localised (`SERPER_API_KEY`) |
+| OCR for scans | FR-2.1 | Scans are refused with a clear reason, not silently accepted | Claude vision extraction (`ANTHROPIC_API_KEY`) |
+| Assistant | FR-10 | Domain guard + canned answers | Claude, same guard (`ANTHROPIC_API_KEY`) |
+| Payments | FR-8.2 | Applies the change directly, no card fields anywhere | Razorpay payment links (`RAZORPAY_KEY_*`) |
 
-Each adapter is selected by credential availability in
-[adapters/index.ts](src/lib/adapters/index.ts): set the env var and that one
-service goes live. A missing key degrades to the mock rather than failing.
+These four are written but **unproven** — they have never executed against a
+real provider, because no keys were available. Treat them as untested code.
 
 With a live gateway, plan activation moves to the payment webhook — the browser
 returning from checkout must never be what unlocks a tier. That split is already
-written into [lib/billing/actions.ts](src/lib/billing/actions.ts).
+written into [adapters/live.ts](src/lib/adapters/live.ts): `createCheckout`
+returns a link and deliberately does *not* change the subscription.
 
-**Not built yet:** uploaded files are not stored or extracted for real, PDF and
-Excel export do not generate files, scheduled jobs are managed but nothing runs
-them, and team/profile edits are not yet persisted.
+**Deliberately not built, and visible as such in the interface:**
+
+- **Email.** No provider is connected. Invitations create the member record but
+  deliver no email, so an invited person cannot sign in until a password is set
+  for them; the invite screen says exactly that. Notification preferences are
+  shown as the intended set and are inert.
+- **Rate-book revision feed.** No machine-readable CPWD/State PWD publication
+  feed exists, so the revision job reports which rates have aged past a year
+  rather than pretending to download a new edition.
+- **Custom domain (FR-12.2).** Needs a domain and DNS access from the owner.
+
+---
+
+## Scheduled jobs
+
+Next.js has no in-process scheduler, and running one inside a web dyno would
+fire once per instance. So the schedule lives outside the app: any timer calls
+one endpoint, and it runs whatever is due.
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron
+```
+
+Set `CRON_SECRET` and point a platform cron at it every 15 minutes; a job then
+fires within 15 minutes of its cron time. Without the secret the endpoint
+returns **503** rather than running unauthenticated — it triggers paid
+third-party calls, so an open endpoint would be a billing hole as well as a
+security one. Wrong secrets are rejected with a constant-time comparison.
+
+Schedules are read as five-field cron **in IST**, the working day of every user
+of this product; evaluating in UTC would silently shift an 03:00 job. Each job
+carries a scope — the keywords it matches against line descriptions and rate
+chapters — so two refresh jobs with different names do not silently do each
+other's work. Runs are bounded by both a line cap and a wall-clock budget;
+anything not reached is left for the next run, where its older quotes sort it to
+the front.
 
 ---
 
@@ -230,6 +285,12 @@ them, and team/profile edits are not yet persisted.
 | Tier gating (FR-8.1) | As owner, Billing → switch to Starter; bulk upload, scheduled jobs, Excel export and the assistant lock |
 | Subscription change (FR-8.2) | Billing → change plan; entitlements follow immediately |
 | Assistant refusal (FR-10.3) | Assistant → ask something off-topic |
+| Real extraction (FR-2.1) | Upload → drop a real vendor PDF with an itemised table; the line items come from its text layer, not a fixture |
+| Bulk rate import (FR-9.1) | Administration → Bulk upload → download the template, edit it, import; bad rows are reported by line number, never dropped silently |
+| Rate CRUD (FR-9.1) | Administration → Rate library → Add rate. Shared rate-book rows cannot be deleted; editing one creates your own override |
+| Scheduled jobs (FR-9.2) | Administration → Scheduled jobs → Run now; the result, next run and item count all update |
+| Exports (FR-6.1) | Open a document → Export PDF / Excel |
+| Suspension revoking access (FR-7.2) | Team → suspend a member; their live sessions are deleted, not left to expire |
 | Location adjustment (FR-3.3) | Change the city in the top bar, then open the Rate library |
 | Tenant isolation | Register a second account; it sees an empty workspace, not the demo data |
 
@@ -257,7 +318,7 @@ moving; each is isolated to one place in the code.
 | 3 | Pricing API | Serper, adapter-swappable | `adapters/live.ts` |
 | 4 | Payment gateway | Razorpay, INR | `adapters/live.ts` |
 | 5 | Subscription tiers | 3 tiers: ₹4,999 / ₹14,999 / custom | `data/org.ts` |
-| 6 | Accuracy targets | Not set; confidence surfaced per field instead | `types.ts` |
+| 6 | Accuracy targets | Not set; per-field confidence surfaced instead, derived from arithmetic reconciliation | `extraction/pdf.ts` |
 | 7 | Export formats | PDF on all tiers, Excel from Professional | `data/org.ts` |
 | 8 | Location handling | User-selected city, per document, with an org default | `prisma/seed.ts` |
 | 10 | Retention | Stated as policy; per-document deletion modelled, windows not enforced | `db/queries.ts` |
@@ -277,10 +338,11 @@ moving; each is isolated to one place in the code.
 
 ## Notes on the data
 
-Fixture rates, vendors, projects and organisations are invented for
+Seeded rates, vendors, projects and organisations are invented for
 demonstration. Rate figures are plausible for the Delhi baseline but are **not**
-real CPWD DSR values, and market quotes are synthesised around the baseline
-rather than fetched. Nothing in this repository should be quoted to a vendor.
+real CPWD DSR values, and without `SERPER_API_KEY` market quotes are synthesised
+around that baseline rather than fetched. Nothing produced by this deployment
+should be quoted to a vendor until a licensed rate book is loaded.
 
 ---
 
@@ -288,5 +350,9 @@ rather than fetched. Nothing in this repository should be quoted to a vendor.
 
 Per the SoW/NDA: all source code, logic, database structures, designs and
 documentation are the property of the project owner. API keys and credentials
-belong in `.env`, which is git-ignored and must never be committed. The local
-SQLite database is git-ignored for the same reason.
+belong in `.env`, which is git-ignored and must never be committed.
+
+The Supabase **anon** key must never be exposed to the browser: row-level
+security is off on the Prisma-created tables, so PostgREST with that key would
+read every tenant's documents. Only `NEXT_PUBLIC_SUPABASE_URL` is public; the
+service-role key is server-side only and is used solely for Storage.

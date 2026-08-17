@@ -212,6 +212,7 @@ async function main() {
       schedule: job.schedule,
       target: job.target,
       kind: job.kind,
+      scope: job.scope.length ? job.scope.join(",") : null,
       lastRun: new Date(job.lastRun),
       nextRun: new Date(job.nextRun),
       lastStatus: job.lastStatus,

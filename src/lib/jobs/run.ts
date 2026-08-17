@@ -24,20 +24,43 @@ const STALE_AFTER_DAYS = 30;
 const MAX_LINES_PER_RUN = 120;
 
 /**
+ * Wall-clock budget for one job.
+ *
+ * The line cap alone is not enough: a live pricing provider can take seconds
+ * per lookup, so 120 lines would outlast any request timeout. Whatever is not
+ * reached inside the budget is simply left for the next run — its quotes are
+ * older, so it sorts to the front next time.
+ */
+const RUN_BUDGET_MS = 120_000;
+
+/**
  * Re-fetches market pricing for lines whose quotes have gone stale.
  *
- * `onlyStale` is what separates the two pricing jobs: the routine refresh takes
- * the oldest quotes regardless, the stale sweep takes only those past the
- * threshold and reports zero when there is nothing to do.
+ * `onlyStale` separates the routine refresh from the sweep: the refresh takes
+ * the oldest quotes regardless, the sweep takes only those past the threshold
+ * and reports zero when there is nothing to do. `scope` narrows a job to the
+ * material categories its name claims, so two refresh jobs do not silently do
+ * each other's work.
  */
-async function refreshPrices(organisationId: string, onlyStale: boolean): Promise<JobResult> {
+async function refreshPrices(
+  organisationId: string,
+  onlyStale: boolean,
+  scope: string[],
+): Promise<JobResult> {
   const cutoff = new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60_000);
+  const deadline = Date.now() + RUN_BUDGET_MS;
 
   const lines = await prisma.lineItem.findMany({
     where: {
       invoice: { organisationId, status: { in: ["analysed", "needs_review"] } },
-      ...(onlyStale
-        ? { marketQuotes: { some: { fetchedAt: { lt: cutoff } } } }
+      ...(onlyStale ? { marketQuotes: { some: { fetchedAt: { lt: cutoff } } } } : {}),
+      ...(scope.length
+        ? {
+            OR: scope.flatMap((word) => [
+              { description: { contains: word, mode: "insensitive" as const } },
+              { sorEntry: { chapter: { contains: word, mode: "insensitive" as const } } },
+            ]),
+          }
         : {}),
     },
     include: {
@@ -45,7 +68,7 @@ async function refreshPrices(organisationId: string, onlyStale: boolean): Promis
       marketQuotes: { orderBy: { fetchedAt: "asc" }, take: 1 },
     },
     // Oldest pricing first — the lines most likely to be wrong get seen first
-    // when a run hits the cap.
+    // when a run hits a cap.
     orderBy: { invoice: { uploadedAt: "desc" } },
     take: MAX_LINES_PER_RUN,
   });
@@ -55,15 +78,21 @@ async function refreshPrices(organisationId: string, onlyStale: boolean): Promis
       status: "success",
       itemsRefreshed: 0,
       detail: onlyStale
-        ? `No quotes older than ${STALE_AFTER_DAYS} days.`
-        : "No priced line items to refresh.",
+        ? `No quotes older than ${STALE_AFTER_DAYS} days${scope.length ? " in this job's categories" : ""}.`
+        : `No priced line items ${scope.length ? "in this job's categories " : ""}to refresh.`,
     };
   }
 
   let refreshed = 0;
   let failed = 0;
+  let skipped = 0;
 
   for (const line of lines) {
+    if (Date.now() > deadline) {
+      skipped = lines.length - refreshed - failed;
+      break;
+    }
+
     try {
       const quotes = await services.pricing.search({
         description: line.description,
@@ -103,13 +132,21 @@ async function refreshPrices(organisationId: string, onlyStale: boolean): Promis
     }
   }
 
+  const clean = failed === 0 && skipped === 0;
+  const notes: string[] = [];
+  if (failed > 0) {
+    notes.push(`${failed} returned no usable listing and kept their previous quotes`);
+  }
+  if (skipped > 0) {
+    notes.push(`${skipped} ran out of time this run and are queued for the next`);
+  }
+
   return {
-    status: failed === 0 ? "success" : refreshed > 0 ? "partial" : "failed",
+    status: clean ? "success" : refreshed > 0 ? "partial" : "failed",
     itemsRefreshed: refreshed,
-    detail:
-      failed === 0
-        ? `Refreshed pricing on ${refreshed} line items.`
-        : `Refreshed ${refreshed} of ${lines.length}; ${failed} returned no usable listing and kept their previous quotes.`,
+    detail: clean
+      ? `Refreshed pricing on ${refreshed} line items.`
+      : `Refreshed ${refreshed} of ${lines.length}; ${notes.join("; ")}.`,
   };
 }
 
@@ -159,16 +196,18 @@ export async function runJob(job: {
   name: string;
   schedule: string;
   kind: string;
+  scope: string | null;
 }): Promise<JobResult> {
   let result: JobResult;
+  const scope = job.scope ? job.scope.split(",").filter(Boolean) : [];
 
   try {
     switch (job.kind as CronKind) {
       case "price_refresh":
-        result = await refreshPrices(job.organisationId, false);
+        result = await refreshPrices(job.organisationId, false, scope);
         break;
       case "stale_sweep":
-        result = await refreshPrices(job.organisationId, true);
+        result = await refreshPrices(job.organisationId, true, scope);
         break;
       case "sor_revision":
         result = await checkSorRevisions(job.organisationId);
@@ -210,7 +249,7 @@ export async function runJob(job: {
 export async function runDueJobs(now: Date = new Date()) {
   const due = await prisma.cronJob.findMany({
     where: { enabled: true, nextRun: { lte: now } },
-    select: { id: true, organisationId: true, name: true, schedule: true, kind: true },
+    select: { id: true, organisationId: true, name: true, schedule: true, kind: true, scope: true },
   });
 
   const results: { job: string; organisationId: string; result: JobResult }[] = [];
