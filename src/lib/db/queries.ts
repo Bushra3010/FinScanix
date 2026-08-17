@@ -137,6 +137,7 @@ function toInvoice(row: InvoiceRow): Invoice {
     fileName: row.fileName,
     fileSizeKb: row.fileSizeKb,
     pageCount: row.pageCount,
+    hasOriginal: row.storageKey !== null,
     quality: toQualityReport(row),
     // Totals are derived, never stored — the line items are the only source of
     // truth, so a corrected line can never leave a stale total behind.

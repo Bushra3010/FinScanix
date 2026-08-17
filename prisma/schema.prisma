@@ -166,6 +166,8 @@ model Invoice {
   fileSizeKb     Int
   pageCount      Int
   taxPct         Float
+  /// Object key in Supabase Storage. Null when the original was not retained.
+  storageKey     String?
 
   // Quality gate outcome — FR-1.2
   qualityPassed   Boolean

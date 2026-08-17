@@ -160,6 +160,8 @@ export interface Invoice {
   fileName: string;
   fileSizeKb: number;
   pageCount: number;
+  /** True when the uploaded original was retained and can be downloaded. */
+  hasOriginal: boolean;
   quality: QualityReport;
   subtotal: number;
   taxPct: number;

@@ -52,6 +52,11 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
   const checks: QualityCheck[] = [];
   const sizeMb = input.bytes.byteLength / (1024 * 1024);
 
+  // pdf.js, under unpdf, transfers ownership of the buffer it parses and leaves
+  // the caller's view detached. Anything read after extraction — the upload to
+  // storage, most of all — must work from a copy taken before it runs.
+  const original = input.bytes.slice();
+
   // ── Gate 1: is this even a processable file? ────────────────────────────
   const typeOk = ACCEPTED.has(input.mimeType);
   checks.push({
@@ -137,7 +142,9 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
   // Scans, photographs, and PDFs with no text layer go to the vision model.
   if (!hasTextLayer) {
     try {
-      extracted = await extractFromImage(input.bytes, input.mimeType);
+      // `original`, not input.bytes: for a scanned PDF the text-layer attempt
+      // above has already run, and it leaves input.bytes detached.
+      extracted = await extractFromImage(original, input.mimeType);
       checks.push({
         id: "ocr",
         label: "OCR extraction",
@@ -223,16 +230,26 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
   });
 
   if (storageConfigured) {
+    const key = documentKey(input.organisationId, invoice.id, input.fileName);
     try {
-      await putDocument(
-        documentKey(input.organisationId, invoice.id, input.fileName),
-        input.bytes,
-        input.mimeType,
-      );
+      await putDocument(key, original, input.mimeType);
+      // storageKey is what the download route keys off, so it is set only on a
+      // confirmed upload. A failed store leaves it null and the interface says
+      // the original is unavailable rather than offering a link that 404s.
+      await prisma.invoice.update({ where: { id: invoice.id }, data: { storageKey: key } });
     } catch (error) {
-      // Storage is not worth losing the extraction over; the report still
-      // stands on its own, and the failure is recorded rather than swallowed.
+      // Storage is not worth losing the extraction over — the report stands on
+      // its own — but the failure is recorded, not swallowed.
       console.error("Document storage failed", error);
+      await prisma.activityEvent.create({
+        data: {
+          organisationId: input.organisationId,
+          invoiceId: invoice.id,
+          kind: "upload",
+          actor: "System",
+          message: `Could not retain the original of ${input.fileName}; the analysis is unaffected`,
+        },
+      });
     }
   }
 

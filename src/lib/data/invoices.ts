@@ -222,7 +222,7 @@ const passedGate = (score: number, note: string): QualityReport => ({
  * Invoice fixtures
  * ------------------------------------------------------------------ */
 
-const rawInvoices: Invoice[] = [
+const rawInvoices: Omit<Invoice, "hasOriginal">[] = [
   {
     id: "inv-0842",
     number: "INV-2026-0842",
@@ -798,7 +798,10 @@ function withTotals(inv: Invoice): Invoice {
   };
 }
 
-export const INVOICES: Invoice[] = rawInvoices.map(withTotals);
+// Fixtures have no uploaded original behind them, so none offers a download.
+export const INVOICES: Invoice[] = rawInvoices.map((invoice) =>
+  withTotals({ ...invoice, hasOriginal: false }),
+);
 
 export function analyse(invoice: Invoice): AnalysedInvoice {
   const lineItems = analyseLines(invoice.lineItems);

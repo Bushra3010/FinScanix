@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Download,
   ExternalLink,
+  FileText,
   Pencil,
   LoaderCircle,
   Store,
@@ -206,6 +207,16 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
             <Badge tone="brand">
               {corrections} correction{corrections === 1 ? "" : "s"} saved
             </Badge>
+          )}
+          {invoice.hasOriginal && (
+            <a
+              href={`/api/invoices/${invoice.id}/original`}
+              className={buttonStyles({ variant: "outline", size: "sm" })}
+              title={`Open ${invoice.fileName} as uploaded`}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Original
+            </a>
           )}
           {allows("report.export") ? (
             <>
