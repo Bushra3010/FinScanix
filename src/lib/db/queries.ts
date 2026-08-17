@@ -238,6 +238,7 @@ export async function listSorEntries(organisationId: string): Promise<SorEntry[]
     source: row.source,
     chapter: row.chapter,
     effectiveFrom: row.effectiveFrom.toISOString(),
+    owned: row.organisationId !== null,
   }));
 }
 
@@ -305,6 +306,7 @@ export async function listCronJobs(organisationId: string): Promise<CronJob[]> {
     name: row.name,
     schedule: row.schedule,
     target: row.target,
+    kind: row.kind as CronJob["kind"],
     lastRun: row.lastRun.toISOString(),
     nextRun: row.nextRun.toISOString(),
     lastStatus: row.lastStatus as CronJob["lastStatus"],

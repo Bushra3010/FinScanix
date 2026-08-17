@@ -1,28 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { CircleAlert, Play, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { runJobNowAction, toggleJobAction, type JobActionState } from "@/lib/jobs/actions";
 import type { CronJob } from "@/lib/types";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 
 export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
-  const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(jobs.map((job) => [job.id, job.enabled])),
-  );
-  const [running, setRunning] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Record<string, JobActionState>>({});
+  const [, startTransition] = useTransition();
 
-  function runNow(id: string) {
-    setRunning(id);
-    setTimeout(() => setRunning(null), 1400);
+  function call(id: string, action: (data: FormData) => Promise<JobActionState>, data: FormData) {
+    setBusy(id);
+    startTransition(async () => {
+      const state = await action(data);
+      setOutcome((prev) => ({ ...prev, [id]: state }));
+      setBusy(null);
+    });
   }
 
   return (
     <div className="space-y-4">
       {jobs.map((job) => {
-        const on = enabled[job.id];
+        const running = busy === job.id;
+        const state = outcome[job.id];
+
         return (
           <Card key={job.id}>
             <CardHeader>
@@ -40,7 +46,7 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
                   >
                     Last run {job.lastStatus}
                   </Badge>
-                  {!on && <Badge tone="outline">Paused</Badge>}
+                  {!job.enabled && <Badge tone="outline">Paused</Badge>}
                 </div>
                 <CardDescription>{job.target}</CardDescription>
               </div>
@@ -49,10 +55,14 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => runNow(job.id)}
-                  disabled={running === job.id || !on}
+                  disabled={running || !job.enabled}
+                  onClick={() => {
+                    const data = new FormData();
+                    data.set("id", job.id);
+                    call(job.id, runJobNowAction, data);
+                  }}
                 >
-                  {running === job.id ? (
+                  {running ? (
                     <>
                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                       Running
@@ -68,18 +78,26 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={on}
-                  aria-label={`${on ? "Disable" : "Enable"} ${job.name}`}
-                  onClick={() => setEnabled((prev) => ({ ...prev, [job.id]: !prev[job.id] }))}
+                  aria-checked={job.enabled}
+                  aria-label={`${job.enabled ? "Disable" : "Enable"} ${job.name}`}
+                  disabled={running}
+                  onClick={() => {
+                    const data = new FormData();
+                    data.set("id", job.id);
+                    data.set("enabled", String(!job.enabled));
+                    call(job.id, toggleJobAction, data);
+                  }}
                   className={cn(
-                    "relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors",
-                    on ? "border-brand bg-brand" : "border-border-strong bg-surface-sunken",
+                    "relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors disabled:opacity-50",
+                    job.enabled
+                      ? "border-brand bg-brand"
+                      : "border-border-strong bg-surface-sunken",
                   )}
                 >
                   <span
                     className={cn(
                       "absolute top-0.5 h-4.5 w-4.5 rounded-full bg-surface shadow-sm transition-transform",
-                      on ? "translate-x-5.5" : "translate-x-0.5",
+                      job.enabled ? "translate-x-5.5" : "translate-x-0.5",
                     )}
                   />
                 </button>
@@ -87,17 +105,34 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
             </CardHeader>
 
             <CardContent className="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Detail label="Schedule" value={job.schedule} mono />
+              <Detail label="Schedule" value={`${job.schedule}  IST`} mono />
               <Detail label="Last run" value={formatDate(job.lastRun, "datetime")} />
               <Detail
                 label="Next run"
-                value={on ? formatDate(job.nextRun, "datetime") : "Paused"}
+                value={job.enabled ? formatDate(job.nextRun, "datetime") : "Paused"}
               />
               <Detail
                 label="Items refreshed"
                 value={job.itemsRefreshed > 0 ? formatNumber(job.itemsRefreshed) : "—"}
               />
             </CardContent>
+
+            {(state?.error || state?.result) && (
+              <div
+                className={cn(
+                  "mx-5 mb-5 rounded-lg border px-3 py-2",
+                  state.error || state.result?.status === "failed"
+                    ? "border-over/40 bg-over-soft/50"
+                    : state.result?.status === "partial"
+                      ? "border-warning/40 bg-warning-soft/50"
+                      : "border-par/40 bg-par-soft/50",
+                )}
+              >
+                <p className="text-[12.5px] leading-relaxed text-foreground">
+                  {state.error ?? state.result?.detail}
+                </p>
+              </div>
+            )}
           </Card>
         );
       })}
@@ -108,7 +143,9 @@ export function ScheduledJobs({ jobs }: { jobs: CronJob[] }) {
           <span className="font-medium text-foreground">Hybrid update model.</span> Scheduled jobs
           keep market pricing current between manual rate uploads. A partial result means some
           sources returned no listing for an item — those items keep their previous quote and are
-          re-queued on the next run rather than being dropped from reports.
+          re-queued on the next run rather than being dropped from reports. Schedules are read in
+          IST and fired by an external scheduler calling <code className="font-mono">/api/cron</code>;
+          without that timer configured, only <em>Run now</em> executes a job.
         </p>
       </div>
     </div>

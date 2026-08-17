@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/guard";
+import { deleteInvoiceAction } from "@/lib/invoices/actions";
 import { getInvoice } from "@/lib/db/queries";
 import type { AnalysedInvoice } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/utils";
@@ -77,14 +78,17 @@ export default async function InvoiceDetailPage({
               {invoice.documentType}
             </Badge>
             <Can permission="invoice.delete">
-              <button
-                type="button"
-                className={buttonStyles({ variant: "ghost", size: "sm" })}
-                title="Deletes only this document and its artifacts"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </button>
+              <form action={deleteInvoiceAction}>
+                <input type="hidden" name="invoiceId" value={invoice.id} />
+                <button
+                  type="submit"
+                  className={buttonStyles({ variant: "ghost", size: "sm" })}
+                  title="Deletes this document, its line items, quotes and stored file — and nothing else"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              </form>
             </Can>
           </>
         }

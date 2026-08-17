@@ -42,6 +42,11 @@ export interface SorEntry {
   source: string;
   chapter: string;
   effectiveFrom: string;
+  /**
+   * True when this entry belongs to the tenant rather than the shared public
+   * rate book. Only owned entries can be edited or removed.
+   */
+  owned: boolean;
 }
 
 /** A live market price fetched from a B2B/e-commerce source — FR-4.1. */
@@ -246,11 +251,15 @@ export interface RateUpload {
 }
 
 /** Scheduled market-price refresh — FR-9.2. */
+export type CronKind = "price_refresh" | "sor_revision" | "stale_sweep";
+
 export interface CronJob {
   id: string;
   name: string;
   schedule: string;
   target: string;
+  /** Which routine this job runs — the runner dispatches on it. */
+  kind: CronKind;
   lastRun: string;
   nextRun: string;
   lastStatus: "success" | "partial" | "failed";

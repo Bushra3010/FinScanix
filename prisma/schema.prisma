@@ -284,6 +284,7 @@ model CronJob {
   name           String
   schedule       String
   target         String
+  kind           String   @default("price_refresh")
   lastRun        DateTime
   nextRun        DateTime
   lastStatus     String

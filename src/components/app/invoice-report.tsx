@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { saveLineCorrectionAction } from "@/lib/invoices/actions";
 import {
   Check,
   ChevronDown,
@@ -9,7 +11,7 @@ import {
   Download,
   ExternalLink,
   Pencil,
-  RotateCcw,
+  LoaderCircle,
   Store,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +41,9 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [saving, startSaving] = useTransition();
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const router = useRouter();
 
   const analysed = useMemo(() => analyseLines(items), [items]);
   const summary = useMemo(() => summarise(analysed), [analysed]);
@@ -57,28 +62,52 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
       LOW_CONFIDENCE,
   );
 
+  /**
+   * Applies the edit locally first so the verdict moves as the reviewer types,
+   * then persists it. The optimistic update is what makes the engine feel
+   * live; the server write is what makes it real.
+   */
   function applyEdit(id: string, patch: { quantity?: number; rate?: number }) {
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        const quantity = patch.quantity ?? item.quantity;
-        const rate = patch.rate ?? item.rate;
-        return {
-          ...item,
-          quantity,
-          rate,
-          amount: Math.round(quantity * rate * 100) / 100,
-          corrected: true,
-          // A confirmed field is no longer uncertain.
-          confidence: { description: 1, quantity: 1, rate: 1 },
-        };
-      }),
-    );
-  }
+    const current = items.find((item) => item.id === id);
+    if (!current) return;
 
-  function resetCorrections() {
-    setItems(invoice.lineItems.map(({ variance: _variance, ...rest }) => rest));
-    setEditing(null);
+    const quantity = patch.quantity ?? current.quantity;
+    const rate = patch.rate ?? current.rate;
+    if (!Number.isFinite(quantity) || quantity <= 0) return;
+    if (!Number.isFinite(rate) || rate < 0) return;
+    if (quantity === current.quantity && rate === current.rate) return;
+
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              quantity,
+              rate,
+              amount: Math.round(quantity * rate * 100) / 100,
+              corrected: true,
+              // A confirmed field is no longer uncertain.
+              confidence: { description: 1, quantity: 1, rate: 1 },
+            }
+          : item,
+      ),
+    );
+
+    const payload = new FormData();
+    payload.set("invoiceId", invoice.id);
+    payload.set("lineId", id);
+    payload.set("quantity", String(quantity));
+    payload.set("rate", String(rate));
+
+    startSaving(async () => {
+      const result = await saveLineCorrectionAction(payload);
+      if (result?.error) {
+        setSaveError(result.error);
+        router.refresh();
+      } else {
+        setSaveError(null);
+      }
+    });
   }
 
   const filters: { key: FilterKey; label: string; count: number }[] = [
@@ -166,28 +195,35 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {corrections > 0 && (
-            <>
-              <Badge tone="brand">
-                {corrections} correction{corrections === 1 ? "" : "s"} applied
-              </Badge>
-              <Button size="sm" variant="ghost" onClick={resetCorrections}>
-                <RotateCcw className="h-3.5 w-3.5" />
-                Reset
-              </Button>
-            </>
+          {saving && (
+            <Badge tone="neutral">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              Saving
+            </Badge>
+          )}
+          {saveError && <Badge tone="over">{saveError}</Badge>}
+          {corrections > 0 && !saving && (
+            <Badge tone="brand">
+              {corrections} correction{corrections === 1 ? "" : "s"} saved
+            </Badge>
           )}
           {allows("report.export") ? (
             <>
-              <Button size="sm" variant="outline">
+              <a
+                href={`/api/invoices/${invoice.id}/export?format=pdf`}
+                className={buttonStyles({ variant: "outline", size: "sm" })}
+              >
                 <Download className="h-3.5 w-3.5" />
                 PDF
-              </Button>
+              </a>
               {entitled("export_excel") ? (
-                <Button size="sm" variant="outline">
+                <a
+                  href={`/api/invoices/${invoice.id}/export?format=xlsx`}
+                  className={buttonStyles({ variant: "outline", size: "sm" })}
+                >
                   <Download className="h-3.5 w-3.5" />
                   Excel
-                </Button>
+                </a>
               ) : (
                 <a
                   href="/app/settings/billing"

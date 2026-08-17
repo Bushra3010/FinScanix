@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import { Check, CircleAlert, Download, FileSpreadsheet, LoaderCircle, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableWrap, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { importRatesAction, type RateActionState } from "@/lib/rates/actions";
 import type { RateUpload } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -24,18 +25,24 @@ DSR 13.1.2,"12 mm cement plaster of mix 1:6 (1 cement : 6 fine sand) on rough si
 MAT-CEM 1.1,"Ordinary Portland Cement 53 grade conforming to IS 12269, supplied at site in 50 kg bags",bag,405,CPWD Market Rate Schedule 2024,Materials — Cement,2024-04-01
 `;
 
-type Phase = "idle" | "validating" | "done";
-
 export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [fileName, setFileName] = useState("");
+  const [state, formAction, pending] = useActionState<RateActionState, FormData>(
+    importRatesAction,
+    {},
+  );
+  const [picked, setPicked] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  function handleFile(name: string) {
-    setFileName(name);
-    setPhase("validating");
-    setTimeout(() => setPhase("done"), 1100);
+  function take(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setPicked(file.name);
+    if (inputRef.current && files !== inputRef.current.files) {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      inputRef.current.files = transfer.files;
+    }
   }
 
   function downloadTemplate() {
@@ -51,23 +58,23 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Upload a rate file</CardTitle>
-              <CardDescription>
-                CSV or Excel. Rows are validated before anything is written — a bad row is
-                reported, never silently dropped.
-              </CardDescription>
-            </div>
-            <Button size="sm" variant="outline" onClick={downloadTemplate}>
-              <Download className="h-3.5 w-3.5" />
-              Template
-            </Button>
-          </CardHeader>
+        <form action={formAction}>
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Upload a rate file</CardTitle>
+                <CardDescription>
+                  CSV. Every row is validated before anything is written — a bad row is
+                  reported, never silently dropped.
+                </CardDescription>
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>
+                <Download className="h-3.5 w-3.5" />
+                Template
+              </Button>
+            </CardHeader>
 
-          <CardContent>
-            {phase === "idle" && (
+            <CardContent className="space-y-4">
               <div
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -77,8 +84,7 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                 onDrop={(event) => {
                   event.preventDefault();
                   setDragging(false);
-                  const file = event.dataTransfer.files?.[0];
-                  if (file) handleFile(file.name);
+                  take(event.dataTransfer.files);
                 }}
                 className={cn(
                   "flex flex-col items-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors",
@@ -91,79 +97,85 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                   <FileSpreadsheet className="h-5 w-5" />
                 </div>
                 <p className="mt-4 text-[14px] font-semibold text-foreground">
-                  Drop a CSV or Excel file
+                  {picked ?? "Drop a CSV file"}
                 </p>
                 <p className="mt-1 text-[12.5px] text-muted-foreground">
-                  Up to 10,000 rows per upload
+                  Up to 5 MB — roughly 40,000 rows
                 </p>
-                <Button size="sm" className="mt-4" onClick={() => inputRef.current?.click()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => inputRef.current?.click()}
+                >
                   <Upload className="h-3.5 w-3.5" />
                   Choose file
                 </Button>
                 <input
                   ref={inputRef}
+                  name="file"
                   type="file"
-                  accept=".csv,.xlsx,.xls"
+                  accept=".csv,text/csv"
                   className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) handleFile(file.name);
-                  }}
+                  onChange={(event) => take(event.target.files)}
                 />
               </div>
-            )}
 
-            {phase === "validating" && (
-              <div className="flex flex-col items-center px-6 py-12 text-center">
-                <LoaderCircle className="h-6 w-6 animate-spin text-brand" />
-                <p className="mt-4 text-[13.5px] font-medium text-foreground">
-                  Validating {fileName}
-                </p>
-                <p className="mt-1 text-[12.5px] text-muted-foreground">
-                  Checking columns, units and duplicate codes
-                </p>
-              </div>
-            )}
+              {state.error && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-over/40 bg-over-soft/50 p-4">
+                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
+                  <p className="text-[13px] leading-relaxed text-foreground">{state.error}</p>
+                </div>
+              )}
 
-            {phase === "done" && (
-              <div>
-                <div className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-sunken/50 p-4">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-par" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13.5px] font-semibold text-foreground">
-                      {fileName} validated
-                    </p>
-                    <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                      248 rows parsed · 241 ready to apply · 7 rejected. In the production build
-                      you would confirm here and the accepted rows would be written to the rate
-                      library with a new effective date.
-                    </p>
+              {state.summary && (
+                <div
+                  className={cn(
+                    "rounded-xl border p-4",
+                    state.ok ? "border-par/40 bg-par-soft/40" : "border-over/40 bg-over-soft/40",
+                  )}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {state.ok ? (
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-par" />
+                    ) : (
+                      <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
+                    )}
+                    <div>
+                      <p className="text-[13.5px] font-semibold text-foreground">
+                        {state.summary.accepted} of {state.summary.total} rows applied
+                      </p>
+                      {state.summary.rejected > 0 && (
+                        <p className="mt-1 text-[13px] text-muted-foreground">
+                          {state.summary.rejected} row
+                          {state.summary.rejected === 1 ? "" : "s"} rejected:
+                        </p>
+                      )}
+                    </div>
                   </div>
+                  {state.summary.problems.length > 0 && (
+                    <ul className="mt-2.5 space-y-1 pl-7 text-[12.5px] text-muted-foreground">
+                      {state.summary.problems.map((problem) => (
+                        <li key={problem}>{problem}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
+              )}
 
-                <div className="mt-4 rounded-xl border border-over/40 bg-over-soft/40 p-4">
-                  <div className="flex items-center gap-2">
-                    <CircleAlert className="h-4 w-4 shrink-0 text-over" />
-                    <p className="text-[13px] font-semibold text-foreground">7 rejected rows</p>
-                  </div>
-                  <ul className="mt-2.5 space-y-1.5 text-[12.5px] text-muted-foreground">
-                    <li>Rows 14, 27, 88 — unit &quot;sq.mt&quot; does not normalise to a known unit</li>
-                    <li>Rows 41, 42 — duplicate code within the file</li>
-                    <li>Row 156 — base_rate is not numeric</li>
-                    <li>Row 203 — effective_from is not a valid ISO date</li>
-                  </ul>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button size="sm">Apply 241 rows</Button>
-                  <Button size="sm" variant="outline" onClick={() => setPhase("idle")}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              <Button type="submit" disabled={!picked || pending}>
+                {pending ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    Validating and applying…
+                  </>
+                ) : (
+                  "Import rates"
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </form>
 
         <Card>
           <CardHeader>
@@ -181,6 +193,11 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                 </li>
               ))}
             </ul>
+            <p className="border-t border-border px-5 py-3 text-[11.5px] leading-relaxed text-muted-foreground">
+              Rows are matched on <code className="font-mono">code</code>: re-importing a
+              corrected file updates those rates rather than duplicating them. Your rates take
+              priority over the shared CPWD book when a code collides.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -189,7 +206,7 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
         <CardHeader>
           <div>
             <CardTitle>Upload history</CardTitle>
-            <CardDescription>Every rate change is attributable and reversible</CardDescription>
+            <CardDescription>Every rate change is attributable</CardDescription>
           </div>
         </CardHeader>
         <TableWrap>
@@ -225,7 +242,15 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                     )}
                   </TD>
                   <TD>
-                    <Badge tone={upload.status === "processed" ? "par" : upload.status === "failed" ? "over" : "brand"}>
+                    <Badge
+                      tone={
+                        upload.status === "processed"
+                          ? "par"
+                          : upload.status === "failed"
+                            ? "over"
+                            : "brand"
+                      }
+                    >
                       {upload.status}
                     </Badge>
                   </TD>
@@ -237,6 +262,11 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
             </TBody>
           </Table>
         </TableWrap>
+        {uploads.length === 0 && (
+          <p className="px-5 py-10 text-center text-[13px] text-muted-foreground">
+            No rate files imported yet.
+          </p>
+        )}
       </Card>
     </div>
   );

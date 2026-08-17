@@ -33,7 +33,7 @@ export function getCity(id: string): City {
  * The production seed is loaded from the licensed CPWD DSR / State PWD books
  * (see open question 2 in the PRD) and versioned by effective date.
  */
-export const SOR_CATALOG: SorEntry[] = [
+const SOR_SEED: Omit<SorEntry, "owned">[] = [
   {
     id: "sor-001",
     code: "DSR 2.8.1",
@@ -331,6 +331,9 @@ export const SOR_CATALOG: SorEntry[] = [
     effectiveFrom: "2024-04-01",
   },
 ];
+
+/** The seed is the shared public rate book, so nothing in it is tenant-owned. */
+export const SOR_CATALOG: SorEntry[] = SOR_SEED.map((entry) => ({ ...entry, owned: false }));
 
 export function getSor(code: string): SorEntry | undefined {
   return SOR_CATALOG.find((s) => s.code === code);

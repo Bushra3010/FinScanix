@@ -387,6 +387,7 @@ export const RATE_UPLOADS: RateUpload[] = [
 export const CRON_JOBS: CronJob[] = [
   {
     id: "cron-01",
+    kind: "price_refresh",
     name: "Market price refresh — core materials",
     schedule: "0 3 * * *",
     target: "Cement, steel, aggregates, tiles across 15 cities",
@@ -398,6 +399,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-02",
+    kind: "price_refresh",
     name: "Market price refresh — E&M and fittings",
     schedule: "0 4 * * 1,4",
     target: "Luminaires, switchgear, plumbing fixtures",
@@ -409,6 +411,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-03",
+    kind: "sor_revision",
     name: "SoR revision check",
     schedule: "0 6 1 * *",
     target: "CPWD DSR + State PWD publication feeds",
@@ -420,6 +423,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "cron-04",
+    kind: "stale_sweep",
     name: "Stale price sweep",
     schedule: "30 2 * * 0",
     target: "Flag quotes older than 30 days for re-fetch",

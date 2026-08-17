@@ -211,6 +211,7 @@ async function main() {
       name: job.name,
       schedule: job.schedule,
       target: job.target,
+      kind: job.kind,
       lastRun: new Date(job.lastRun),
       nextRun: new Date(job.nextRun),
       lastStatus: job.lastStatus,

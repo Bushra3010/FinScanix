@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/app/page-parts";
+import { OrganisationForm, ProfileForm } from "@/components/app/settings-forms";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { FieldHint, Input, Label, Select } from "@/components/ui/field";
 import { requireUser } from "@/lib/auth/guard";
 import { listCities } from "@/lib/db/queries";
-import { ROLE_LABEL } from "@/lib/data/org";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -23,6 +22,7 @@ const NOTIFICATIONS = [
 export default async function SettingsPage() {
   const user = await requireUser();
   const cities = await listCities();
+  const canEditOrg = user.role === "owner" || user.role === "admin";
 
   return (
     <>
@@ -32,77 +32,9 @@ export default async function SettingsPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Profile</CardTitle>
-              <CardDescription>Shown on the audit trail of anything you touch</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="profile-name">Full name</Label>
-              <Input id="profile-name" defaultValue={user.name} />
-            </div>
-            <div>
-              <Label htmlFor="profile-email">Work email</Label>
-              <Input id="profile-email" type="email" defaultValue={user.email} />
-            </div>
-            <div>
-              <Label htmlFor="profile-role">Role</Label>
-              <Input id="profile-role" defaultValue={ROLE_LABEL[user.role]} disabled />
-              <FieldHint>
-                Roles are assigned by an account owner from{" "}
-                <Link href="/app/settings/team" className="text-brand hover:underline">
-                  Team &amp; roles
-                </Link>
-                .
-              </FieldHint>
-            </div>
-          </CardContent>
-          <CardFooter>
-            <span className="text-[12px] text-muted-foreground">
-              Changes apply to new activity only
-            </span>
-            <Button size="sm">Save profile</Button>
-          </CardFooter>
-        </Card>
+        <ProfileForm user={user} />
 
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Organisation</CardTitle>
-              <CardDescription>Appears on exported variance reports</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="org-name">Organisation name</Label>
-              <Input id="org-name" defaultValue={user.organisation.name} />
-            </div>
-            <div>
-              <Label htmlFor="org-gstin">GSTIN</Label>
-              <Input id="org-gstin" defaultValue={user.organisation.gstin} className="font-mono" />
-            </div>
-            <div>
-              <Label htmlFor="org-city">Default project city</Label>
-              <Select id="org-city" defaultValue={user.organisation.defaultCityId}>
-                {cities.map((city) => (
-                  <option key={city.id} value={city.id}>
-                    {city.name}, {city.state} — index {city.indexFactor.toFixed(2)}
-                  </option>
-                ))}
-              </Select>
-              <FieldHint>
-                Used when a document does not specify a location. Each document can override it.
-              </FieldHint>
-            </div>
-          </CardContent>
-          <CardFooter>
-            <span className="text-[12px] text-muted-foreground">Owners and admins only</span>
-            <Button size="sm">Save organisation</Button>
-          </CardFooter>
-        </Card>
+        <OrganisationForm user={user} cities={cities} canEdit={canEditOrg} />
 
         <Card>
           <CardHeader>
@@ -116,12 +48,13 @@ export default async function SettingsPage() {
               {NOTIFICATIONS.map((item) => (
                 <label
                   key={item.id}
-                  className="flex cursor-pointer items-start gap-2.5 text-[13px] text-muted-foreground"
+                  className="flex items-start gap-2.5 text-[13px] text-muted-foreground"
                 >
                   <input
                     type="checkbox"
                     defaultChecked={item.default}
-                    className="mt-0.5 h-4 w-4 cursor-pointer rounded border-border-strong accent-[var(--brand)]"
+                    disabled
+                    className="mt-0.5 h-4 w-4 rounded border-border-strong accent-[var(--brand)]"
                   />
                   {item.label}
                 </label>
@@ -129,8 +62,10 @@ export default async function SettingsPage() {
             </div>
           </CardContent>
           <CardFooter>
-            <span />
-            <Button size="sm">Save preferences</Button>
+            <span className="text-[12px] leading-relaxed text-muted-foreground">
+              No email provider is connected to this deployment yet, so none of these alerts are
+              sent. The list is shown as the intended set, not as active preferences.
+            </span>
           </CardFooter>
         </Card>
 

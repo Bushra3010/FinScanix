@@ -1,16 +1,17 @@
-import type { MarketQuote } from "../types";
+import Anthropic from "@anthropic-ai/sdk";
+import { getCity } from "@/lib/data/reference";
+import { answerInDomain, classifyDomain, OUT_OF_DOMAIN_REPLY } from "@/lib/assistant";
+import { getTier } from "@/lib/data/org";
+import type { MarketQuote } from "@/lib/types";
 import type { AssistantAdapter, PaymentAdapter, PricingSearchAdapter } from "./types";
 
 /**
- * Live adapter seams.
+ * Live provider implementations.
  *
- * These are the exact places a real provider gets wired in. Each one is
- * intentionally thin: request shape, response mapping, nothing else. They are
- * only selected when their credentials are present (see ./index.ts), so the
- * prototype never calls them.
- *
- * Keys are read from the server environment and must never be exposed to the
- * client — no NEXT_PUBLIC_ prefix on any of them (NDA §12, NFR: Security).
+ * Each is selected only when its credentials are present (see ./index.ts), so a
+ * missing key degrades to the mock rather than failing a request. Keys are read
+ * from the server environment and never prefixed NEXT_PUBLIC_ — none of this
+ * reaches the browser.
  */
 
 class NotConfiguredError extends Error {
@@ -20,7 +21,36 @@ class NotConfiguredError extends Error {
   }
 }
 
-/** FR-4.1 — Serper (or any search API) for B2B/e-commerce pricing. */
+/* ------------------------------------------------------------------ *
+ * Market pricing — Serper shopping search (FR-4.1 / FR-4.2)
+ * ------------------------------------------------------------------ */
+
+interface SerperShoppingItem {
+  title?: string;
+  source?: string;
+  link?: string;
+  price?: string;
+  delivery?: string;
+}
+
+/** Serper returns prices as display strings — "₹1,234.00", "Rs. 980". */
+function parsePrice(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  if (!cleaned) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function platformFor(link: string | undefined): MarketQuote["platform"] {
+  const url = (link ?? "").toLowerCase();
+  if (url.includes("indiamart")) return "IndiaMART";
+  if (url.includes("moglix")) return "Moglix";
+  if (url.includes("tradeindia")) return "TradeIndia";
+  if (url.includes("amazon.")) return "Amazon Business";
+  return "Direct dealer";
+}
+
 export const serperPricingSearch: PricingSearchAdapter = {
   id: "pricing",
   provider: "Serper",
@@ -31,19 +61,64 @@ export const serperPricingSearch: PricingSearchAdapter = {
     const apiKey = process.env.SERPER_API_KEY;
     if (!apiKey) throw new NotConfiguredError("Serper", ["SERPER_API_KEY"]);
 
-    // TODO(live): POST https://google.serper.dev/shopping with
-    //   { q: `${description} price ${cityName} site:indiamart.com OR site:moglix.com`, gl: "in" }
-    // then map each result to a MarketQuote, dropping listings whose unit does
-    // not normalise to `unit`, and stamp fetchedAt for the freshness display.
-    void description;
-    void unit;
-    void cityId;
-    void limit;
-    throw new NotConfiguredError("Serper pricing search", ["SERPER_API_KEY"]);
+    const city = getCity(cityId);
+
+    // Trim to the distinctive words: a full 200-character SoR description is a
+    // worse search query than the handful of terms that identify the product.
+    const query = description
+      .replace(/[^a-zA-Z0-9 ]/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length > 3)
+      .slice(0, 8)
+      .join(" ");
+
+    const response = await fetch("https://google.serper.dev/shopping", {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        q: `${query} price`,
+        gl: "in",
+        hl: "en",
+        location: `${city.name}, India`,
+        num: Math.max(limit * 3, 10),
+      }),
+      // Pricing must never hold up a document; the pipeline treats a failure
+      // here as "no market quote" and benchmarks on the SoR alone.
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Serper returned ${response.status}: ${await response.text()}`);
+    }
+
+    const payload = (await response.json()) as { shopping?: SerperShoppingItem[] };
+    const fetchedAt = new Date().toISOString();
+
+    return (payload.shopping ?? [])
+      .map((item, index) => {
+        const price = parsePrice(item.price);
+        if (price === null) return null;
+        return {
+          id: `serper-${cityId}-${index}-${fetchedAt}`,
+          seller: item.source?.trim() || item.title?.slice(0, 40) || "Listed seller",
+          platform: platformFor(item.link),
+          price,
+          unit,
+          location: city.name,
+          url: item.link ?? "",
+          fetchedAt,
+          inStock: !/out of stock/i.test(item.delivery ?? ""),
+        } satisfies MarketQuote;
+      })
+      .filter((quote): quote is MarketQuote => quote !== null)
+      .slice(0, limit);
   },
 };
 
-/** FR-8.2 — Razorpay subscription checkout. */
+/* ------------------------------------------------------------------ *
+ * Payments — Razorpay payment links (FR-8.2)
+ * ------------------------------------------------------------------ */
+
 export const razorpayPayments: PaymentAdapter = {
   id: "payments",
   provider: "Razorpay",
@@ -57,17 +132,57 @@ export const razorpayPayments: PaymentAdapter = {
       throw new NotConfiguredError("Razorpay", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]);
     }
 
-    // TODO(live): create a subscription against the plan id mapped from tierId +
-    // billingCycle, return its short_url. Entitlements must be activated from the
-    // webhook (subscription.charged), never from the browser redirect — FR-8.3.
-    void tierId;
-    void billingCycle;
-    void organisationId;
-    throw new NotConfiguredError("Razorpay checkout", ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"]);
+    const tier = getTier(tierId);
+    const rupees = billingCycle === "annual" ? tier.priceAnnual : tier.priceMonthly;
+    if (rupees <= 0) {
+      throw new Error(`${tier.name} is quoted manually and has no self-serve checkout.`);
+    }
+
+    const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+    const base = process.env.APP_BASE_URL ?? "";
+
+    const response = await fetch("https://api.razorpay.com/v1/payment_links", {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        // Razorpay works in paise.
+        amount: Math.round(rupees * 100),
+        currency: "INR",
+        description: `FinScanix ${tier.name} — ${billingCycle}`,
+        reference_id: `${organisationId}:${tierId}:${billingCycle}:${Date.now()}`,
+        notes: { organisationId, tierId, billingCycle },
+        callback_url: `${base}/app/settings/billing`,
+        callback_method: "get",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Razorpay returned ${response.status}: ${await response.text()}`);
+    }
+
+    const link = (await response.json()) as { id: string; short_url: string };
+
+    // The tier is NOT activated here. Entitlements change only when the
+    // payment webhook confirms capture — otherwise abandoning the checkout
+    // page would unlock a paid plan (FR-8.3).
+    return { checkoutUrl: link.short_url, reference: link.id, amount: rupees };
   },
 };
 
-/** FR-10 — model-backed assistant, still behind the domain guard. */
+/* ------------------------------------------------------------------ *
+ * Assistant — Claude, behind the domain guard (FR-10)
+ * ------------------------------------------------------------------ */
+
+const ASSISTANT_SYSTEM = `You are the FinScanix assistant. FinScanix verifies vendor invoices and quotations for the construction and facilities-management sector, benchmarking each line item against government Schedule of Rates data and live market pricing.
+
+You answer only questions about construction, facilities management, engineering, hospitality and commercial buildings, building maintenance, industrial projects, procurement and rate auditing, and the FinScanix product itself.
+
+If a question falls outside those areas, reply with exactly this sentence and nothing else:
+${OUT_OF_DOMAIN_REPLY}
+
+Answer in British English. Be concrete: cite rate codes, units and figures where they apply, and say plainly when something depends on data the user would need to check rather than guessing at it.`;
+
 export const claudeAssistant: AssistantAdapter = {
   id: "assistant",
   provider: "Claude",
@@ -75,15 +190,49 @@ export const claudeAssistant: AssistantAdapter = {
   requiredEnv: ["ANTHROPIC_API_KEY"],
 
   async ask({ question, history }) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new NotConfiguredError("Claude", ["ANTHROPIC_API_KEY"]);
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new NotConfiguredError("Claude", ["ANTHROPIC_API_KEY"]);
+    }
 
-    // TODO(live): call the Messages API with a system prompt that restates the
-    // domain restriction and the exact fallback sentence. classifyDomain() runs
-    // first as a cheap pre-filter so obvious off-topic questions never reach the
-    // model — see lib/assistant.ts.
-    void question;
-    void history;
-    throw new NotConfiguredError("Claude assistant", ["ANTHROPIC_API_KEY"]);
+    // Cheap pre-filter: an obviously off-topic question never reaches the model,
+    // which saves a call and makes the refusal instant and exact.
+    const verdict = classifyDomain(question);
+    if (!verdict.inDomain) {
+      return { answer: OUT_OF_DOMAIN_REPLY, outOfDomain: true };
+    }
+
+    const client = new Anthropic();
+
+    try {
+      const response = await client.messages.create({
+        model: "claude-opus-5",
+        max_tokens: 16000,
+        system: ASSISTANT_SYSTEM,
+        thinking: { type: "adaptive" },
+        messages: [
+          ...history.slice(-8).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: "user" as const, content: question },
+        ],
+      });
+
+      if (response.stop_reason === "refusal") {
+        return { answer: OUT_OF_DOMAIN_REPLY, outOfDomain: true };
+      }
+
+      const text = response.content.find((block) => block.type === "text");
+      const answer = text && text.type === "text" ? text.text.trim() : "";
+      if (!answer) return { answer: answerInDomain(question), outOfDomain: false };
+
+      // The model was told the exact refusal sentence; honour it if it used one.
+      return { answer, outOfDomain: answer === OUT_OF_DOMAIN_REPLY };
+    } catch (error) {
+      if (error instanceof Anthropic.APIError) {
+        throw new Error(`Assistant provider error (${error.status}): ${error.message}`);
+      }
+      throw error;
+    }
   },
 };
