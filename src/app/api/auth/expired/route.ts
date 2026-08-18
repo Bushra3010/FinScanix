@@ -18,14 +18,22 @@ import { SESSION_COOKIE } from "@/lib/auth/constants";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const user = await getSessionUser();
+/**
+ * Redirects to a path, not an absolute URL.
+ *
+ * Behind a proxy — Railway's included — `request.url` inside a Route Handler is
+ * the internal origin the container was addressed on, so building an absolute
+ * URL from it sends the browser to localhost. A relative Location is resolved
+ * by the browser against the address it actually used, which is always right.
+ */
+function redirectTo(path: string) {
+  return new NextResponse(null, { status: 303, headers: { Location: path } });
+}
 
-  if (user) {
-    return NextResponse.redirect(new URL("/app/dashboard", request.url));
-  }
+export async function GET() {
+  if (await getSessionUser()) return redirectTo("/app/dashboard");
 
-  const response = NextResponse.redirect(new URL("/login?expired=1", request.url));
+  const response = redirectTo("/login?expired=1");
   response.cookies.delete(SESSION_COOKIE);
   return response;
 }
