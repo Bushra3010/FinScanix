@@ -15,7 +15,16 @@ import type { TierId } from "@/lib/types";
  * and exchanged for a database-backed session cookie. Nothing about the
  * password reaches the client bundle or the URL.
  */
-export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: TierId }) {
+export function AuthForm({
+  mode,
+  plan,
+  expired,
+}: {
+  mode: "login" | "register";
+  plan?: TierId;
+  /** Set when the visitor arrived because their session had lapsed. */
+  expired?: boolean;
+}) {
   const isRegister = mode === "register";
   const [state, formAction, pending] = useActionState<AuthState, FormData>(
     isRegister ? registerAction : loginAction,
@@ -32,6 +41,16 @@ export function AuthForm({ mode, plan }: { mode: "login" | "register"; plan?: Ti
           ? "14-day trial of the full pipeline. No card required."
           : "Verify vendor rates against SoR and live market pricing."}
       </p>
+
+      {expired && (
+        <div className="mt-5 flex gap-2.5 rounded-lg border border-warning/40 bg-warning-soft/50 px-3.5 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <p className="text-[12.5px] leading-relaxed text-foreground">
+            Your session has ended — it either expired or was signed out elsewhere. Sign in again
+            to carry on.
+          </p>
+        </div>
+      )}
 
       {!isRegister && (
         <div className="mt-5 flex gap-2.5 rounded-lg border border-border bg-brand-soft/50 px-3.5 py-3">

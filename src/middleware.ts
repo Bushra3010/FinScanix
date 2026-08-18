@@ -9,6 +9,13 @@ import { SESSION_COOKIE } from "@/lib/auth/constants";
  * session is valid, unexpired and belongs to an active user — happens in the
  * /app layout via requireUser(). Treat this as a redirect optimisation, never
  * as the security boundary.
+ *
+ * It deliberately does NOT bounce /login to the app when a cookie is present.
+ * A cookie outlives its session row (expiry, revocation, a reseeded database),
+ * and this layer cannot tell a live cookie from a dead one. Sending anyone
+ * holding a cookie to /app produced an infinite loop: /app rejected the dead
+ * session and redirected to /login, which bounced straight back. That decision
+ * belongs to the login page, which can actually resolve the session.
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -20,13 +27,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (hasCookie && (pathname === "/login" || pathname === "/register")) {
-    return NextResponse.redirect(new URL("/app/dashboard", request.url));
-  }
-
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/app/:path*", "/login", "/register"],
+  matcher: ["/app/:path*"],
 };

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/auth/auth-form";
+import { getSessionUser } from "@/lib/auth/session";
 import type { TierId } from "@/lib/types";
 
 export const metadata: Metadata = {
@@ -14,6 +16,8 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<{ plan?: string }>;
 }) {
+  if (await getSessionUser()) redirect("/app/dashboard");
+
   const { plan } = await searchParams;
   const selected = VALID_PLANS.includes(plan as TierId) ? (plan as TierId) : undefined;
 

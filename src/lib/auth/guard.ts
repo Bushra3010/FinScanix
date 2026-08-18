@@ -13,7 +13,10 @@ import type { Entitlement } from "@/lib/types";
 
 export async function requireUser(): Promise<SessionUser> {
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  // Via the route handler rather than straight to /login, because a page being
+  // rendered cannot delete a cookie — and leaving a dead cookie in place is
+  // what turned an expired session into a redirect loop.
+  if (!user) redirect("/api/auth/expired");
   return user;
 }
 
