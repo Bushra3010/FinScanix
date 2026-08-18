@@ -173,7 +173,10 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     passed: foundItems,
     detail: foundItems
       ? `${lines.length} line items recovered`
-      : "No item rows could be identified in the document",
+      : // Showing what was actually read turns "it did not work" into something
+        // that can be acted on — by the person uploading, or by whoever has to
+        // teach the parser this layout.
+        `No item rows could be identified. Text read from the document began: "${(extracted?.sampleText ?? "").slice(0, 220).replace(/\s+/g, " ").trim() || "(nothing)"}"`,
   });
 
   if (!foundItems) {

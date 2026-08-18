@@ -200,5 +200,7 @@ export async function extractFromImage(
     documentNumber: payload.documentNumber?.trim() || undefined,
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
+    // The vision path never sees a text layer, so there is none to sample.
+    sampleText: lines.map((line) => line.description).join(" | ").slice(0, 600),
   };
 }
