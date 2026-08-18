@@ -7,22 +7,28 @@ import { extractText, getDocumentProxy } from "unpdf";
  * It is not OCR: a scanned image has no text layer and falls through to the
  * vision adapter (see lib/extraction/vision.ts).
  *
- * Two things make real vendor bills harder than they look.
+ * Four things about real vendor bills drive the shape of this file.
  *
- * First, a PDF has no notion of a "line". Billing software draws each cell at
- * its own coordinates, and a naive text dump returns them in content-stream
- * order, which is not reading order. So rows are rebuilt from the glyph
- * positions — grouped by y, ordered by x — rather than trusted as given.
+ * A PDF has no notion of a line. Billing software draws each cell at its own
+ * coordinates and a plain text dump returns them in content-stream order, which
+ * is not reading order. Rows are rebuilt from glyph positions instead.
  *
- * Second, descriptions wrap. A row's text can occupy three visual lines while
- * its quantity, rate and amount sit on only one of them. Rows are therefore
- * assembled by accumulating text until the numeric block that closes a row
- * appears, instead of assuming one row per line.
+ * Descriptions wrap. A row's text can occupy three visual lines while its
+ * quantity and rate sit on only one, so rows are assembled by accumulating text
+ * until the numbers that close a row arrive.
  *
- * Confidence is not decoration. Every candidate row is checked against its own
- * arithmetic — qty × rate should equal the printed amount — and rows that do
- * not reconcile are surfaced for review rather than silently trusted. That is a
- * real signal, unlike a model's self-reported score.
+ * Currency symbols are not text. Fonts encode the rupee sign in whatever slot
+ * they like — a private-use codepoint, or NUL — and it arrives glued to the
+ * figure. Left alone it stops the number being read as a number at all.
+ *
+ * Column order varies. "Qty Rate Amount" and "Price Quantity GST Amount" are
+ * both common, and the second computes (price + tax) x qty. Guessing by
+ * position gets the rate and quantity backwards, so the header is read first
+ * and the columns it names are what the rows are mapped onto.
+ *
+ * Confidence is not decoration. Every row is checked against its own
+ * arithmetic, and rows that do not reconcile are surfaced for review rather
+ * than silently trusted. That is a real signal, unlike a model's self-report.
  */
 
 export interface ExtractedLine {
@@ -30,7 +36,9 @@ export interface ExtractedLine {
   description: string;
   unit: string;
   quantity: number;
+  /** Rate before tax — the basis the rate library and market pricing compare on. */
   rate: number;
+  /** quantity x rate, before tax, so an invoice-level tax cannot be counted twice. */
   amount: number;
   confidence: { description: number; quantity: number; rate: number };
 }
@@ -55,28 +63,61 @@ export interface ExtractionResult {
 /** Units seen in Indian construction and FM billing. */
 const UNITS = [
   "cum", "cu.m", "cu m", "m3", "sqm", "sq.m", "sq m", "m2", "rmt", "rm", "metre", "meter", "mtr", "m",
-  "kg", "kgs", "mt", "ton", "tons", "tonne", "quintal", "bag", "bags", "nos", "no", "nO", "each", "unit", "units",
+  "kg", "kgs", "mt", "ton", "tons", "tonne", "quintal", "bag", "bags", "nos", "no", "each", "unit", "units",
   "point", "points", "pt", "set", "sets", "pair", "pairs", "litre", "liter", "ltr", "l", "sqft", "sft", "cft", "ft", "rft",
   "ls", "l.s", "lot", "job", "month", "days", "day", "hour", "hrs", "visit", "trip", "roll", "coil", "box", "pkt",
+  "pcs", "pc", "piece", "pieces",
 ];
 
 const UNIT_RE = new RegExp(`^(${UNITS.map((u) => u.replace(/[.\s]/g, "\\$&")).join("|")})\\.?$`, "i");
+
+/**
+ * Qualifiers that precede a unit and form part of it: "288 sq ft", "12 cu m".
+ * Without absorbing these the walk halts on the qualifier and leaves the
+ * quantity on the far side of it, unread.
+ */
+const UNIT_PREFIX_RE = /^(sq|cu|cubic|square|running|metric|lin|linear)\.?$/i;
 
 const GSTIN_RE = /\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/;
 const NUMBER_RE = /^-?(?:\d{1,3}(?:,\d{2,3})*|\d+)(?:\.\d+)?$/;
 
 /** Rows that close a table rather than belong to it. */
 const NOT_AN_ITEM =
-  /^(total|sub\s*-?\s*total|grand\s*total|net\s*(amount|total|payable)|amount\s*(in\s*words|chargeable)|gst|cgst|sgst|igst|vat|tax|round(ing)?|discount|freight|packing|advance|balance|less\b|add\b|tcs|tds|e\.?\s*&\s*o\.?e|terms|declaration|bank|ifsc|for\s+[A-Z])/i;
+  /^(total|sub\s*-?\s*total|grand\s*total|net\s*(amount|total|payable)|amount\s*(in\s*words|chargeable)|round(ing)?|freight|packing|advance|balance|less\b|add\b|tcs|tds|e\.?\s*&\s*o\.?e|terms|declaration|bank|ifsc|account no|for\s+[A-Z]|scope\s+of\s+work|technical\s+spec|basis\s+of\s+quote|payment\s+(schedule|terms)|exclusions?|inclusions?|assumptions?|validity|warranty|notes?\b)/i;
 
-/** Words that name a column. A line carrying several of them is a table header. */
-const COLUMN_WORDS =
-  /\b(s\.?\s?no|sr|sl|#|item|particulars|description|desc|hsn|sac|qty|quantity|unit|uom|rate|price|amount|value|disc|discount|total)\b/gi;
+/**
+ * Tax and discount lines, which close a table — but only when a figure follows.
+ *
+ * "GST 18%" and "CGST @ 9" are totals. "GST Registration" and "Discount coupon
+ * printing" are things a vendor sells, and dropping them loses real line items.
+ * What separates them is what comes next: a number, a percentage, or nothing.
+ */
+const TAX_ROW =
+  /^(gst|cgst|sgst|igst|utgst|vat|tax|discount|disc)\b\s*[:@-]?\s*(\d|%|$)/i;
 
-function isHeaderRow(line: string) {
-  const hits = line.match(COLUMN_WORDS)?.length ?? 0;
-  // Three column names and no substantial figures: a header, not an item.
-  return hits >= 3 && !/\d{3,}/.test(line);
+/**
+ * Characters a font may leave in the way of reading a figure: C0/C1 control
+ * codes and the private-use area, where rupee glyphs frequently land.
+ */
+const INVISIBLE_RE = new RegExp("[\\u0000-\\u001F\\u007F-\\u009F\\uE000-\\uF8FF]", "g");
+
+/**
+ * Strips everything a font may have put in the way of reading a figure.
+ *
+ * The rupee sign is the usual offender. Fonts map it to a private-use
+ * codepoint, or — as one real quotation in testing did — to NUL, which
+ * String.trim() does not remove because it is a control character, not
+ * whitespace. Whatever slot it lands in, it arrives attached to the number and
+ * has to go before the number can be recognised as one.
+ */
+function normaliseGlyphs(text: string) {
+  return text
+    .replace(INVISIBLE_RE, " ")
+    // Currency signs, symbolic or written.
+    .replace(/[₹₨￥$€£¥]/g, " ")
+    .replace(/\b(?:INR|Rs\.?)\s*(?=[\d.,])/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function toNumber(token: string) {
@@ -87,10 +128,191 @@ function isNumeric(token: string) {
   return NUMBER_RE.test(token) && Number.isFinite(toNumber(token));
 }
 
+/**
+ * Collapses a stated range to its midpoint.
+ *
+ * Indian material quotations routinely price a line as "410 – 440 / bag". That
+ * is a real quote, not a defect, and the midpoint is how it gets costed — so it
+ * is read, and the row's confidence marked down to say the figure was derived
+ * rather than printed.
+ */
+function collapseRanges(tokens: string[]): { tokens: string[]; sawRange: boolean } {
+  const out: string[] = [];
+  let sawRange = false;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const glued = tokens[i].match(/^(\d[\d,]*(?:\.\d+)?)\s*[–—−-]\s*(\d[\d,]*(?:\.\d+)?)$/);
+    if (glued && isNumeric(glued[1]) && isNumeric(glued[2])) {
+      out.push(String((toNumber(glued[1]) + toNumber(glued[2])) / 2));
+      sawRange = true;
+      continue;
+    }
+
+    const isDash = /^[–—−-]$|^to$/i.test(tokens[i + 1] ?? "");
+    if (isNumeric(tokens[i]) && isDash && isNumeric(tokens[i + 2] ?? "")) {
+      out.push(String((toNumber(tokens[i]) + toNumber(tokens[i + 2])) / 2));
+      sawRange = true;
+      i += 2;
+      continue;
+    }
+
+    out.push(tokens[i]);
+  }
+
+  return { tokens: out, sawRange };
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading the header
+ * ------------------------------------------------------------------ */
+
+type ColumnKind = "hsn" | "qty" | "rate" | "tax" | "discount" | "amount";
+
+const COLUMN_PATTERNS: [RegExp, ColumnKind][] = [
+  [/^(hsn|sac)$/i, "hsn"],
+  [/^(qty|quantity|nos)\.?$/i, "qty"],
+  [/^(rate|price|mrp|rates)$/i, "rate"],
+  [/^(gst|tax|cgst|sgst|igst|vat)$/i, "tax"],
+  [/^(disc|discount)%?$/i, "discount"],
+  [/^(amount|value|total)$/i, "amount"],
+];
+
+/** Words that name a column. A line carrying several of them is a table header. */
+const COLUMN_WORDS =
+  /\b(s\.?\s?no|sl|sr|#|item|particulars|description|desc|hsn|sac|qty|quantity|unit|uom|rate|price|mrp|amount|value|gst|tax|disc|discount|total|cost)\b/gi;
+
+function isHeaderRow(line: string) {
+  const hits = line.match(COLUMN_WORDS)?.length ?? 0;
+  // Three column names and no substantial figures: a header, not an item.
+  return hits >= 3 && !/\d{3,}/.test(line);
+}
+
+/**
+ * The value-bearing columns a header declares, left to right.
+ *
+ * Only these matter: the serial, description and unit columns carry no figure,
+ * so they cannot be confused with one when the row's numbers are mapped back.
+ */
+function readHeaderColumns(line: string): ColumnKind[] {
+  const kinds: ColumnKind[] = [];
+  for (const token of line.split(/[\s()]+/)) {
+    const word = token.replace(/[^A-Za-z%.]/g, "");
+    if (!word) continue;
+    for (const [pattern, kind] of COLUMN_PATTERNS) {
+      if (pattern.test(word) && !kinds.includes(kind)) {
+        kinds.push(kind);
+        break;
+      }
+    }
+  }
+  return kinds;
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading one row's figures
+ * ------------------------------------------------------------------ */
+
+interface RowValues {
+  quantity: number;
+  rate: number;
+  amount: number;
+  tax: number;
+  reconciles: boolean;
+}
+
+/**
+ * Whether a row's figures agree with each other.
+ *
+ * Three arrangements are accepted, because all three appear in the wild:
+ * quantity x rate = amount; (rate + tax) x quantity = amount, where the tax
+ * column is per unit; and quantity x rate + tax = amount, where it is per line.
+ */
+function agrees(quantity: number, rate: number, amount: number, tax: number) {
+  if (!(quantity > 0) || !(rate > 0) || !(amount > 0)) return false;
+  const candidates = [quantity * rate, (rate + tax) * quantity, quantity * rate + tax];
+  return candidates.some((value) => Math.abs(value - amount) / Math.max(amount, 1) <= 0.01);
+}
+
+/** Maps a row's figures onto the columns the header declared. */
+function readByHeader(nums: number[], columns: ColumnKind[]): RowValues | null {
+  if (columns.length < 2 || nums.length < 2) return null;
+
+  // Both sides are aligned from the right. The amount column ends every table,
+  // so anchoring there survives a row that omits an optional leading column —
+  // or carries a stray number the description leaked into the figures.
+  const width = Math.min(nums.length, columns.length);
+  const kinds = columns.slice(columns.length - width);
+  const slice = nums.slice(nums.length - width);
+  const at = (kind: ColumnKind) => {
+    const index = kinds.indexOf(kind);
+    return index === -1 ? undefined : slice[index];
+  };
+
+  const quantity = at("qty");
+  const rate = at("rate");
+  const amount = at("amount");
+  const tax = at("tax") ?? 0;
+
+  if (quantity === undefined || rate === undefined) return null;
+  const resolved = amount ?? quantity * rate;
+
+  return { quantity, rate, amount: resolved, tax, reconciles: agrees(quantity, rate, resolved, tax) };
+}
+
+/**
+ * Works out a row's figures with no header to go on.
+ *
+ * Every candidate arrangement is tested against the arithmetic the row asserts
+ * about itself, and the one that balances wins — which is what lets extra
+ * columns (an HSN code, a discount, a per-line tax) be present without having
+ * to be recognised.
+ */
+function readByArithmetic(nums: number[]): RowValues | null {
+  let best: RowValues | null = null;
+  let bestScore = -1;
+
+  for (let q = 0; q < nums.length; q++) {
+    for (let r = 0; r < nums.length; r++) {
+      if (r === q) continue;
+      for (let a = 0; a < nums.length; a++) {
+        if (a === q || a === r) continue;
+        const tax = nums.find((_, i) => i !== q && i !== r && i !== a) ?? 0;
+        if (!agrees(nums[q], nums[r], nums[a], tax)) continue;
+        // Several arrangements can balance at once — q x r and r x q both do.
+        // Prefer the amount furthest right, then quantity before rate, which is
+        // the order nearly every table is laid out in.
+        const score = (a === nums.length - 1 ? 2 : 0) + (q < r ? 1 : 0);
+        if (!best || score > bestScore) {
+          best = { quantity: nums[q], rate: nums[r], amount: nums[a], tax, reconciles: true };
+          bestScore = score;
+        }
+      }
+    }
+  }
+
+  if (best) return best;
+
+  // Nothing balances. Fall back to the commonest order so the row is still
+  // reported — with the low confidence that says so.
+  if (nums.length >= 3) {
+    const [quantity, rate, amount] = nums.slice(-3);
+    return { quantity, rate, amount, tax: 0, reconciles: false };
+  }
+  if (nums.length === 2 && nums[0] > 0 && nums[1] > 0) {
+    return { quantity: nums[0], rate: nums[1], amount: nums[0] * nums[1], tax: 0, reconciles: false };
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Rebuilding lines from glyph positions
+ * ------------------------------------------------------------------ */
+
 interface Positioned {
   str: string;
   x: number;
   y: number;
+  h: number;
 }
 
 /**
@@ -103,16 +325,27 @@ interface Positioned {
 interface SourceLine {
   text: string;
   x: number | null;
+  y: number | null;
+  /** Glyph height of the tallest run on the line, i.e. its font size. */
+  h: number | null;
 }
 
 /**
- * Rebuilds reading-order lines from glyph positions.
+ * The vertical gap that separates one table row from the next.
  *
- * Items within roughly one line height of each other belong to the same visual
- * line; a wide horizontal gap between them is a column boundary and becomes a
- * space. Returns null when the document exposes no positional data, so the
- * caller can fall back to the plain text dump.
+ * Indentation alone cannot tell a wrapped description from the first line of
+ * the following item — in a table with no serial column both start at the same
+ * x. The spacing does: lines within a row sit at the font's leading, while a
+ * new row is separated by the cell padding as well. Taking the median gap makes
+ * that threshold a property of the document rather than a guessed constant.
  */
+function rowGapThreshold(line: SourceLine) {
+  // Leading is a little over the font size; row padding is well beyond it.
+  // Measuring against the line's own height keeps the threshold local, where a
+  // document-wide median is skewed by whatever prose sits above the table.
+  return line.h && line.h > 0 ? line.h * 1.8 : Number.POSITIVE_INFINITY;
+}
+
 async function positionalLines(
   pdf: Awaited<ReturnType<typeof getDocumentProxy>>,
 ): Promise<SourceLine[] | null> {
@@ -125,11 +358,12 @@ async function positionalLines(
     const items: Positioned[] = [];
     for (const item of content.items) {
       if (!("str" in item) || typeof item.str !== "string") continue;
-      const text = item.str.trim();
+      const text = normaliseGlyphs(item.str);
       if (!text) continue;
       const transform = (item as { transform?: number[] }).transform;
       if (!transform || transform.length < 6) continue;
-      items.push({ str: text, x: transform[4], y: transform[5] });
+      const height = (item as { height?: number }).height ?? 0;
+      items.push({ str: text, x: transform[4], y: transform[5], h: height });
     }
     if (items.length === 0) continue;
 
@@ -142,7 +376,7 @@ async function positionalLines(
       if (!band.length) return;
       band.sort((a, b) => a.x - b.x);
       const text = band.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim();
-      if (text) out.push({ text, x: band[0].x });
+      if (text) out.push({ text, x: band[0].x, y: band[0].y, h: Math.max(...band.map((i) => i.h)) });
       band = [];
     };
 
@@ -161,66 +395,9 @@ async function positionalLines(
   return out.length ? out : null;
 }
 
-/**
- * Chooses which of a row's numbers are quantity, rate and amount.
- *
- * A row can carry more numbers than the three that matter — an HSN code, a
- * discount, a per-line tax. Rather than guessing by position, every candidate
- * triple is tested against the arithmetic the row asserts about itself, and the
- * one that balances wins. Falling back to the last three only happens when
- * nothing balances.
- */
-function pickTriple(nums: number[]): { quantity: number; rate: number; amount: number; reconciles: boolean } {
-  const last3 = nums.slice(-3);
-  let best: { quantity: number; rate: number; amount: number; drift: number } | null = null;
-
-  for (let a = 0; a < nums.length; a++) {
-    for (let b = a + 1; b < nums.length; b++) {
-      for (let c = b + 1; c < nums.length; c++) {
-        const [quantity, rate, amount] = [nums[a], nums[b], nums[c]];
-        if (!(quantity > 0) || !(rate > 0) || !(amount > 0)) continue;
-        const expected = quantity * rate;
-        const drift = Math.abs(expected - amount) / Math.max(expected, 1);
-        if (!best || drift < best.drift) best = { quantity, rate, amount, drift };
-      }
-    }
-  }
-
-  if (best && best.drift <= 0.01) {
-    return { quantity: best.quantity, rate: best.rate, amount: best.amount, reconciles: true };
-  }
-
-  // Two numbers only: quantity and rate, with the amount left implied.
-  if (nums.length === 2 && nums[0] > 0 && nums[1] > 0) {
-    return { quantity: nums[0], rate: nums[1], amount: nums[0] * nums[1], reconciles: false };
-  }
-
-  const [quantity, rate, amount] = [last3[0] ?? 0, last3[1] ?? 0, last3[2] ?? 0];
-  return { quantity, rate, amount, reconciles: false };
-}
-
-/**
- * Removes an HSN/SAC code that a column layout dropped into the description.
- *
- * Eight digits standalone is always a tariff code — no Indian standard runs
- * that long. Six is only removed once the table has declared an HSN or SAC
- * column, because without that context the number is as likely to be part of
- * the specification, and losing it costs a rate match.
- */
-function stripTariffCodes(text: string, sawHsnColumn: boolean) {
-  let out = text.replace(/(?<![\d.,])\d{8}(?![\d.,])/g, " ");
-  if (sawHsnColumn) out = out.replace(/(?<![\d.,])\d{6}(?![\d.,])/g, " ");
-  return out.replace(/\s+/g, " ").trim();
-}
-
-function cleanDescription(text: string) {
-  return text
-    // Only the unambiguous form here — "12." or "12)". A bare leading number is
-    // left for stripSerialColumn, which reads the whole column before deciding.
-    .replace(/^\d{1,3}\s*[.)\-:]\s+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/* ------------------------------------------------------------------ *
+ * Assembling rows
+ * ------------------------------------------------------------------ */
 
 /**
  * Removes the serial-number column when the document turns out to have one.
@@ -253,48 +430,90 @@ function stripSerialColumn(rows: ExtractedLine[]) {
 }
 
 /**
- * Assembles item rows from reading-order lines.
+ * Removes an HSN/SAC code that a column layout dropped into the description.
  *
- * Text accumulates until a line arrives carrying the numeric block that closes
- * a row. That is what keeps a three-line wrapped description attached to the
- * quantity and rate printed beside its first line.
+ * Eight digits standalone is always a tariff code — no Indian standard runs
+ * that long. Six is only removed once the table has declared an HSN or SAC
+ * column, because without that context the number is as likely to be part of
+ * the specification, and losing it costs a rate match.
  */
-function assembleRows(lines: SourceLine[]): ExtractedLine[] {
+function stripTariffCodes(text: string, sawHsnColumn: boolean) {
+  let out = text.replace(/(?<![\d.,])\d{8}(?![\d.,])/g, " ");
+  if (sawHsnColumn) out = out.replace(/(?<![\d.,])\d{6}(?![\d.,])/g, " ");
+  return out.replace(/\s+/g, " ").trim();
+}
+
+function cleanDescription(text: string) {
+  return text
+    // Only the unambiguous form here — "12." or "12)". A bare leading number is
+    // left for stripSerialColumn, which reads the whole column before deciding.
+    .replace(/^\d{1,3}\s*[.)\-:]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+interface Assembled {
+  rows: ExtractedLine[];
+  /** Effective tax rate derived from a per-line tax column, if the table had one. */
+  taxPct?: number;
+}
+
+function assembleRows(lines: SourceLine[]): Assembled {
   const rows: ExtractedLine[] = [];
   let pending: string[] = [];
+  let lastY: number | null = null;
 
-  // Whether the table declares an HSN/SAC column. Those codes sit in their own
-  // column and land inside the description when the row is rebuilt, but they
-  // cannot be removed on sight: a specification is full of standalone numbers
-  // and IS codes run to five digits. Knowing the column exists is what makes
-  // removing six-digit codes safe.
+  // Where a document names its columns, that is where its table begins — and
+  // the covering letter, addresses and pool dimensions above it are not rows,
+  // however many figures they contain. Documents with no header anywhere are
+  // read throughout, since there is nothing better to go on.
+  const hasHeader = lines.some((line) => isHeaderRow(line.text));
+  let insideTable = !hasHeader;
+
+  // Learned from the header: which columns carry figures, and in what order.
+  let columns: ColumnKind[] = [];
   let sawHsnColumn = false;
 
   // Where the row most recently closed began. A following text-only line that
-  // starts to the right of it is that row's wrapped description; one starting
-  // at or left of it belongs to whatever comes next.
+  // starts to the right of it is that row's wrapped description.
   let lastRowX: number | null = null;
+
+  let taxTotal = 0;
+  let netTotal = 0;
+
+  // Where the row's description began, which is not always where its figures
+  // are: a description on its own band leaves the numbers indented into the
+  // price column, and a wrap measured against those looks outdented.
+  let pendingX: number | null = null;
 
   const resetPending = () => {
     pending = [];
+    pendingX = null;
   };
 
   for (const source of lines) {
     const line = source.text.replace(/\s+/g, " ").trim();
+    const previousY = lastY;
+    if (source.y !== null) lastY = source.y;
     if (!line) continue;
 
     // A header ends whatever came before it — vendor name, address, document
     // number — so none of that can drift into the first item's description.
     if (isHeaderRow(line)) {
+      const declared = readHeaderColumns(line);
+      if (declared.length >= 2) columns = declared;
       if (/\b(hsn|sac)\b/i.test(line)) sawHsnColumn = true;
+      insideTable = true;
       resetPending();
       lastRowX = null;
       continue;
     }
 
-    const tokens = line.split(" ");
+    if (!insideTable) continue;
 
-    // Trailing numeric block: the columns that close a row.
+    const { tokens, sawRange } = collapseRanges(line.split(" "));
+
+    // The numbers that close a row, read right to left.
     const trailing: string[] = [];
     let i = tokens.length - 1;
     let unit = "";
@@ -306,32 +525,49 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
     // The unit is not always tidy about which side of the numbers it sits on.
     // "…description cum 42.5 6850 291125" and "…description 42.5 cum 6850 291125"
     // are both common, and in the second the quantity is stranded on the far
-    // side of the unit — read without it the row becomes rate × amount.
+    // side of the unit — read without it the row becomes rate x amount.
     //
     // But reaching across the unit indiscriminately swallows the end of the
     // description: specifications are full of bare numbers ("IS 1786, 8 mm to
     // 25 mm dia"), and taking those loses the words the rate library matches
-    // on. So the reach is conditional — only when the numbers already in hand
-    // do not balance, meaning something really is missing.
+    // on. So the reach is conditional — only while the row does not balance.
     if (i >= 0 && UNIT_RE.test(tokens[i])) {
       unit = tokens[i];
       i -= 1;
-      while (
-        i >= 0 &&
-        isNumeric(tokens[i]) &&
-        !pickTriple(trailing.map(toNumber)).reconciles
-      ) {
+      if (i >= 0 && UNIT_PREFIX_RE.test(tokens[i])) {
+        unit = `${tokens[i].replace(/\.$/, "")}${unit}`;
+        i -= 1;
+      }
+      while (i >= 0 && isNumeric(tokens[i])) {
+        const sofar = readByArithmetic(trailing.map(toNumber));
+        if (sofar?.reconciles) break;
         trailing.unshift(tokens[i]);
         i -= 1;
       }
     }
 
-    const head = tokens.slice(0, i + 1).join(" ").trim();
+    let head = tokens.slice(0, i + 1).join(" ").trim();
+    let figures = trailing.map(toNumber);
 
-    if (trailing.length < 2) {
-      // No closing numbers, so this is description text. Which row it belongs
-      // to depends on where it sits.
-      if (NOT_AN_ITEM.test(line)) {
+    // Some rows trail a suffix after the figures — "7 – 9 / piece 52,000"
+    // leaves "/ piece" between them. Falling back to every number on the line
+    // reads those rather than discarding the row.
+    if (figures.length < 2) {
+      const all = tokens.filter(isNumeric).map(toNumber);
+      if (all.length >= 2) {
+        figures = all;
+        head = tokens.filter((token) => !isNumeric(token)).join(" ").trim();
+        if (!unit) {
+          const found = tokens.find((token) => UNIT_RE.test(token));
+          if (found) unit = found;
+        }
+      }
+    }
+
+    if (figures.length < 2) {
+      // No figures, so this is description text. Which row it belongs to
+      // depends on where it sits.
+      if (NOT_AN_ITEM.test(line) || TAX_ROW.test(line)) {
         resetPending();
         lastRowX = null;
         continue;
@@ -340,16 +576,20 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
 
       const previous = rows[rows.length - 1];
       // Positional reads put a row's numbers on its FIRST line, so text-only
-      // lines after a row are that row's wrapped description. A line starting
-      // clearly left of the row is a new outdented block, not a wrap — and
-      // where there is no serial column the wrap starts at exactly the row's
-      // own x, so "at or right of" is the test, not "right of".
+      // lines after a row are usually that row's wrapped description. Two
+      // signals separate a wrap from the start of the next item: a wrap is
+      // indented into the description column, and it follows at the font's
+      // leading rather than across the row padding. Indentation alone is not
+      // enough — with no serial column a wrap starts at exactly the row's own x.
+      const gap = previousY !== null && source.y !== null ? previousY - source.y : null;
+      const closeBelow = gap !== null && gap <= rowGapThreshold(source);
+      const indented = source.x !== null && lastRowX !== null && source.x > lastRowX + 2;
+      const aligned = source.x !== null && lastRowX !== null && source.x >= lastRowX - 2;
+
       const isContinuation =
         previous !== undefined &&
-        source.x !== null &&
-        lastRowX !== null &&
-        source.x >= lastRowX - 2 &&
-        pending.length === 0;
+        pending.length === 0 &&
+        (indented || (aligned && closeBelow));
 
       if (isContinuation) {
         // Bounded: a description that keeps growing is a paragraph of terms,
@@ -358,6 +598,7 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
           previous.description = `${previous.description} ${line}`.replace(/\s+/g, " ").trim();
         }
       } else {
+        if (pending.length === 0) pendingX = source.x;
         pending.push(line);
         if (pending.join(" ").length > 600) resetPending();
       }
@@ -373,19 +614,31 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
     const inlineDescription = headTokens.join(" ").trim();
     const description = cleanDescription([...pending, inlineDescription].join(" "));
 
-    if (NOT_AN_ITEM.test(inlineDescription) || NOT_AN_ITEM.test(description)) {
+    if (
+      NOT_AN_ITEM.test(inlineDescription) ||
+      NOT_AN_ITEM.test(description) ||
+      TAX_ROW.test(description)
+    ) {
       resetPending();
       lastRowX = null;
       continue;
     }
-    // An item needs words. A bare numeric strip is a totals row or a stray.
-    if (!/[a-z]{4}/i.test(description)) {
+    // An item needs words, but not long ones: "DSC Fee" and "PAN TAN and
+    // INC20A Fee" are real line items with no four-letter run in them. Counting
+    // letters rather than requiring a run still rejects a bare numeric strip.
+    if ((description.match(/[a-z]/gi)?.length ?? 0) < 4) {
       resetPending();
       continue;
     }
 
-    const { quantity, rate, amount, reconciles } = pickTriple(trailing.map(toNumber));
-    if (!(quantity > 0) || !(rate > 0)) {
+    // The header is the better authority on which figure is which — but only
+    // while it produces a row that adds up. A stray number in the description
+    // shifts the mapping, and then the arithmetic is the more reliable guide.
+    const byHeader = readByHeader(figures, columns);
+    const byArithmetic = readByArithmetic(figures);
+    const values = byHeader?.reconciles ? byHeader : (byArithmetic ?? byHeader);
+
+    if (!values || !(values.quantity > 0) || !(values.rate > 0)) {
       resetPending();
       continue;
     }
@@ -405,23 +658,52 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
       continue;
     }
 
+    // A last check that the row was read at all, rather than merely read into.
+    //
+    // Whatever the columns turn out to mean, the total this row implies should
+    // be a figure the row actually prints — either directly, or with its tax
+    // added where the amount column is tax-inclusive. When it is not, the
+    // numbers have been picked up in the wrong roles, and the safe response is
+    // to drop the row: a fabricated line of 210,000,000 on a 1,250,000 estimate
+    // does more damage to a variance report than a missing one.
+    const implied = values.quantity * values.rate;
+    const withTax = implied + values.tax * values.quantity;
+    const printed = figures.some(
+      (figure) =>
+        Math.abs(figure - implied) / Math.max(implied, 1) <= 0.01 ||
+        Math.abs(figure - withTax) / Math.max(withTax, 1) <= 0.01,
+    );
+    if (!printed) {
+      resetPending();
+      continue;
+    }
+
+    // Amounts are stored before tax. The document's amount column may include
+    // it — "(price + GST) x qty" is a common arrangement — and an invoice-level
+    // tax rate applied on top of a tax-inclusive line would count it twice.
+    const net = Math.round(values.quantity * values.rate * 100) / 100;
+    netTotal += net;
+    taxTotal += values.tax * values.quantity;
+
     rows.push({
       srNo: rows.length + 1,
       description: finalDescription,
       unit: unit.replace(/\.$/, "").toLowerCase() || "nos",
-      quantity,
-      rate,
-      amount: reconciles ? amount : Math.round(quantity * rate * 100) / 100,
+      quantity: values.quantity,
+      rate: values.rate,
+      amount: net,
       confidence: {
         description: finalDescription.length > 18 ? 0.95 : 0.78,
-        quantity: reconciles ? 0.97 : 0.62,
+        // A midpoint taken from a stated range is derived, not printed, and is
+        // held below the review threshold so a human confirms it.
+        quantity: sawRange ? 0.7 : values.reconciles ? 0.97 : 0.62,
         // The rate is what the whole verdict turns on, so an unreconciled row
         // drops below the review threshold rather than being taken on trust.
-        rate: reconciles ? 0.97 : 0.58,
+        rate: sawRange ? 0.7 : values.reconciles ? 0.97 : 0.58,
       },
     });
 
-    lastRowX = source.x;
+    lastRowX = pendingX ?? source.x;
     resetPending();
   }
 
@@ -436,7 +718,12 @@ function assembleRows(lines: SourceLine[]): ExtractedLine[] {
     row.confidence.description = row.description.length > 18 ? 0.95 : 0.78;
   }
 
-  return rows;
+  // A per-line tax column gives the real effective rate, which beats assuming
+  // a flat 18% over a document whose lines are taxed differently.
+  const taxPct =
+    taxTotal > 0 && netTotal > 0 ? Math.round((taxTotal / netTotal) * 10000) / 100 : undefined;
+
+  return { rows, taxPct };
 }
 
 export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResult> {
@@ -444,7 +731,7 @@ export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResul
   const { totalPages, text } = await extractText(pdf, { mergePages: true });
   const dumped: SourceLine[] = (Array.isArray(text) ? text.join("\n") : text)
     .split(/\r?\n/)
-    .map((line) => ({ text: line, x: null }));
+    .map((line) => ({ text: normaliseGlyphs(line), x: null, y: null, h: null }));
 
   // Positional reconstruction is the primary read; the plain dump is the
   // fallback for documents that expose no glyph coordinates.
@@ -460,12 +747,12 @@ export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResul
   // A scanned page yields almost no characters; that is the OCR signal.
   const needsOcr = body.replace(/\s/g, "").length < 200;
 
-  let items = needsOcr ? [] : assembleRows(lines);
+  let assembled: Assembled = needsOcr ? { rows: [] } : assembleRows(lines);
 
   // If positional reconstruction found nothing, the plain dump may still work —
   // some generators emit a clean text layer whose coordinates are unhelpful.
-  if (!needsOcr && items.length === 0 && lines !== dumped) {
-    items = assembleRows(dumped);
+  if (!needsOcr && assembled.rows.length === 0 && lines !== dumped) {
+    assembled = assembleRows(dumped);
   }
 
   const gstin = body.match(GSTIN_RE)?.[0];
@@ -474,24 +761,33 @@ export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResul
   )?.[1];
   const taxMatch = body.match(/\b(5|12|18|28)\s*%/);
 
-  // The vendor is usually the most prominent line above the tax id.
-  const vendor = lines
+  // A company name, preferably self-identified as one. Falling back to the
+  // first substantial line is a guess, and "Quote Number" is what that guess
+  // returns on a document whose letterhead is an image.
+  const candidates = lines
     .map((l) => l.text.trim())
-    .find(
+    .filter(
       (l) =>
         l.length > 6 &&
         l.length < 60 &&
         /[A-Za-z]{4}/.test(l) &&
-        !/invoice|quotation|gstin|^\d/i.test(l),
+        !/invoice|quotation|quote|gstin|^\d|^(dear|thank|to|from|date|ref)\b/i.test(l) &&
+        // A name, not a sentence: prose ends in a full stop and runs long.
+        !/[.!?]$/.test(l) &&
+        l.split(/\s+/).length <= 8,
     );
+  const vendor =
+    candidates.find((l) =>
+      /\b(pvt\.?|private|ltd\.?|limited|llp|inc\.?|corporation|enterprises?|industries|traders?|services|suppliers?|associates|constructions?|infra\w*|&\s*co\.?)\b/i.test(l),
+    ) ?? candidates[0];
 
   return {
-    lines: items,
+    lines: assembled.rows,
     pageCount: totalPages ?? pdf.numPages ?? 1,
     vendor,
     vendorGstin: gstin,
     documentNumber: docNo,
-    taxPct: taxMatch ? Number(taxMatch[1]) : 18,
+    taxPct: assembled.taxPct ?? (taxMatch ? Number(taxMatch[1]) : 18),
     needsOcr,
     sampleText: body.slice(0, 600),
   };
