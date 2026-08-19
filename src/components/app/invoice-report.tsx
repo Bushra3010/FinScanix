@@ -20,7 +20,7 @@ import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/misc";
 import { Table, TableWrap, TBody, TD, TH, THead } from "@/components/ui/table";
-import { VarianceBadge, VariancePct } from "@/components/variance-badge";
+import { HealthBadge, VarianceBadge, VariancePct } from "@/components/variance-badge";
 import { useSession } from "@/components/app/session-context";
 import { analyseLines, summarise, VARIANCE_CONFIG } from "@/lib/variance";
 import type { AnalysedInvoice, LineItem, VarianceFlag } from "@/lib/types";
@@ -111,6 +111,21 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
     });
   }
 
+  // What the document itself says, as distinct from what the engine concluded.
+  // BOQ value is the document's own bottom line, tax included, so it can be
+  // checked against the paper without arithmetic.
+  const boqValue = netValue * (1 + invoice.taxPct / 100);
+  const minConfidence = analysed.length
+    ? Math.min(
+        ...analysed.map((line) =>
+          Math.min(line.confidence.description, line.confidence.quantity, line.confidence.rate),
+        ),
+      )
+    : 0;
+  const extractionConfidence =
+    minConfidence >= 0.95 ? "High" : minConfidence >= LOW_CONFIDENCE ? "Medium" : "Low";
+  const restated = analysed.filter((line) => line.printedAmount !== undefined).length;
+
   const filters: { key: FilterKey; label: string; count: number }[] = [
     { key: "all", label: "All items", count: analysed.length },
     { key: "over", label: "Over-priced", count: summary.overCount },
@@ -121,6 +136,19 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
 
   return (
     <>
+      {/* What the document is, before what the engine made of it */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-10 gap-y-3 rounded-xl border border-border bg-surface px-5 py-4">
+        <Fact label="Total items" value={String(items.length)} />
+        <Fact label="BOQ value" value={formatINR(boqValue, { decimals: 0 })} hint={`incl. ${invoice.taxPct}% tax`} />
+        <Fact
+          label="Document type"
+          value={invoice.documentType === "quotation" ? "Quotation" : "Invoice"}
+        />
+        <Fact label="Extraction confidence" value={extractionConfidence} />
+        {invoice.language && <Fact label="Language" value={invoice.language} />}
+        <Fact label="Pages" value={String(invoice.pageCount)} />
+      </div>
+
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryTile label="Net billed value" value={formatINR(netValue, { decimals: 0 })} hint={`${items.length} line items`} />
@@ -262,11 +290,13 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
                 <TH className="w-10">#</TH>
                 <TH>Description</TH>
                 <TH className="text-right">Qty</TH>
-                <TH className="text-right">Billed rate</TH>
+                <TH>Unit</TH>
+                <TH className="text-right">Unit price</TH>
+                <TH className="text-right">Line total</TH>
+                <TH className="text-right">Calc total</TH>
                 <TH className="text-right">Benchmark</TH>
-                <TH className="text-right">Amount</TH>
                 <TH className="text-right">Variance</TH>
-                <TH>Verdict</TH>
+                <TH>Health</TH>
                 <TH className="w-10" />
               </tr>
             </THead>
@@ -342,13 +372,11 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
                             className="tnum h-8 w-24 rounded border border-brand bg-background px-2 text-right text-[13px]"
                           />
                         ) : (
-                          <>
-                            {formatNumber(line.quantity)}
-                            <span className="ml-1 text-[11px] text-muted-foreground">
-                              {line.unit}
-                            </span>
-                          </>
+                          formatNumber(line.quantity)
                         )}
+                      </TD>
+                      <TD className="text-[12.5px] whitespace-nowrap text-muted-foreground">
+                        {line.unit}
                       </TD>
                       <TD
                         className={cn(
@@ -371,11 +399,32 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
                           formatINR(line.rate, { decimals: 2 })
                         )}
                       </TD>
-                      <TD className="tnum text-right text-[13px] whitespace-nowrap text-muted-foreground">
-                        {unmatched ? "—" : formatINR(line.variance.benchmarkRate, { decimals: 2 })}
-                      </TD>
                       <TD className="tnum text-right text-[13px] whitespace-nowrap">
-                        {formatINR(line.amount, { decimals: 0 })}
+                        {formatINR(line.printedAmount ?? line.amount, { decimals: 2 })}
+                      </TD>
+                      <TD
+                        className={cn(
+                          "tnum text-right text-[13px] whitespace-nowrap",
+                          // Flagged only where the document's own total disagrees
+                          // with quantity x unit price, which is the figure a
+                          // reviewer needs pointed out rather than reconciled for
+                          // them. The footer says why.
+                          line.printedAmount !== undefined
+                            ? "font-medium text-over"
+                            : "text-muted-foreground",
+                        )}
+                        title={
+                          line.printedAmount !== undefined
+                            ? "Quantity x unit price. Differs from the printed line total — see the note below the table."
+                            : undefined
+                        }
+                      >
+                        {formatINR(line.amount, { decimals: 2 })}
+                      </TD>
+                      <TD className="tnum text-right text-[13px] whitespace-nowrap text-muted-foreground">
+                        {unmatched
+                          ? "—"
+                          : formatINR(line.variance.benchmarkRate * line.quantity, { decimals: 2 })}
                       </TD>
                       <TD className="text-right whitespace-nowrap">
                         {unmatched ? (
@@ -394,7 +443,7 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
                         )}
                       </TD>
                       <TD>
-                        <VarianceBadge flag={line.variance.flag} unmatched={unmatched} />
+                        <HealthBadge flag={line.variance.flag} unmatched={unmatched} />
                       </TD>
                       <TD>
                         {allows("invoice.correct") && (
@@ -416,7 +465,7 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
 
                     {isOpen && (
                       <tr className="bg-surface-sunken/40">
-                        <td colSpan={10} className="px-5 py-5">
+                        <td colSpan={12} className="px-5 py-5">
                           <Evidence line={line} />
                         </td>
                       </tr>
@@ -433,6 +482,53 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
             No line items in this view.
           </p>
         )}
+
+        {/* How the figures above were obtained, and anything that would
+            otherwise read as an extraction error. */}
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-2 border-t border-border px-5 py-3">
+          <span className="text-[12px] text-muted-foreground">
+            Extraction confidence{" "}
+            <span
+              className={cn(
+                "font-medium",
+                extractionConfidence === "High"
+                  ? "text-par"
+                  : extractionConfidence === "Medium"
+                    ? "text-warning"
+                    : "text-over",
+              )}
+            >
+              {extractionConfidence}
+            </span>
+          </span>
+          {invoice.language && (
+            <span className="text-[12px] text-muted-foreground">
+              Language <span className="font-medium text-foreground">{invoice.language}</span>
+            </span>
+          )}
+          <span className="text-[12px] text-muted-foreground">
+            Source{" "}
+            <span className="font-medium text-foreground">
+              {invoice.quality.checks.some((c) => c.id === "ocr" && c.passed)
+                ? "OCR (vision model)"
+                : "Embedded text layer"}
+            </span>
+          </span>
+          {restated > 0 && (
+            <span className="text-[12px] text-muted-foreground">
+              Restated lines <span className="font-medium text-over">{restated}</span>
+            </span>
+          )}
+        </div>
+
+        {invoice.extractionNote && (
+          <div className="flex gap-2.5 border-t border-border bg-warning-soft/30 px-5 py-3">
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <p className="text-[12px] leading-relaxed text-foreground">
+              {invoice.extractionNote}
+            </p>
+          </div>
+        )}
       </Card>
 
       <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
@@ -440,12 +536,29 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
         {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% median market quote, where both exist.
         Items within ±{VARIANCE_CONFIG.parBandPct}% of benchmark are reported at par. The engine
         is deterministic: re-running this document reproduces this report exactly.
+        {" "}Line total is the figure printed on the document; calc total is quantity x unit
+        price. Where the two differ the calc total is marked, and benchmarking uses the pre-tax
+        unit price either way.
       </p>
     </>
   );
 }
 
 /* ------------------------------------------------------------------ */
+
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <p className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+      </p>
+      <p className="mt-0.5 text-[15px] font-semibold text-foreground">
+        {value}
+        {hint && <span className="ml-1.5 text-[11.5px] font-normal text-muted-foreground">{hint}</span>}
+      </p>
+    </div>
+  );
+}
 
 function SummaryTile({
   label,

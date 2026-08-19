@@ -200,6 +200,9 @@ export async function extractFromImage(
     documentNumber: payload.documentNumber?.trim() || undefined,
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
+    // The vision path reads the page as an image, so there is no text layer to
+    // sample a script from; the model is prompted in English.
+    language: "English",
     // The vision path never sees a text layer, so there is none to sample.
     sampleText: lines.map((line) => line.description).join(" | ").slice(0, 600),
   };

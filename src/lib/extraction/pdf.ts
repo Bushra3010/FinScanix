@@ -40,6 +40,13 @@ export interface ExtractedLine {
   rate: number;
   /** quantity x rate, before tax, so an invoice-level tax cannot be counted twice. */
   amount: number;
+  /**
+   * The line total exactly as the document prints it, when that differs from
+   * quantity x rate — which it does whenever the amount column is tax-inclusive.
+   * Kept so a reviewer can see the document's own figure beside the derived one
+   * rather than wondering why the two disagree.
+   */
+  printedAmount?: number;
   confidence: { description: number; quantity: number; rate: number };
 }
 
@@ -52,6 +59,14 @@ export interface ExtractionResult {
   taxPct: number;
   /** True when the file carried no usable text layer — needs OCR instead. */
   needsOcr: boolean;
+  /**
+   * Plain-language explanation of anything about this document that would
+   * otherwise look like an extraction error — a tax-inclusive amount column,
+   * most often. Shown on the report so the discrepancy is accounted for.
+   */
+  note?: string;
+  /** Script detected in the text layer, which is not always Latin here. */
+  language: string;
   /**
    * The reconstructed text, first few hundred characters. Surfaced when no rows
    * are found so the failure can be diagnosed from the report rather than
@@ -118,6 +133,21 @@ function normaliseGlyphs(text: string) {
     .replace(/\b(?:INR|Rs\.?)\s*(?=[\d.,])/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const DEVANAGARI_RE = new RegExp("[\\u0900-\\u097F]");
+const TAMIL_RE = new RegExp("[\\u0B80-\\u0BFF]");
+const TELUGU_RE = new RegExp("[\\u0C00-\\u0C7F]");
+
+/** Which script the text layer is in — reported, never guessed past what is there. */
+function detectLanguage(body: string) {
+  const scripts: string[] = [];
+  if (/[A-Za-z]{4}/.test(body)) scripts.push("English");
+  if (DEVANAGARI_RE.test(body)) scripts.push("Devanagari");
+  if (TAMIL_RE.test(body)) scripts.push("Tamil");
+  if (TELUGU_RE.test(body)) scripts.push("Telugu");
+  if (scripts.length === 0) return "Undetermined";
+  return scripts.join(" + ");
 }
 
 function toNumber(token: string) {
@@ -443,6 +473,19 @@ function stripTariffCodes(text: string, sawHsnColumn: boolean) {
   return out.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * How well a description was read — which is not the same as how long it is.
+ *
+ * Length was standing in for quality, and it flagged real items for review on
+ * no evidence: "DSC Fee" is complete at seven characters. Only a description
+ * short enough to be a fragment earns any doubt.
+ */
+function describeConfidence(description: string) {
+  if (description.length >= 8) return 0.95;
+  if (description.length >= 4) return 0.85;
+  return 0.7;
+}
+
 function cleanDescription(text: string) {
   return text
     // Only the unambiguous form here — "12." or "12)". A bare leading number is
@@ -456,6 +499,7 @@ interface Assembled {
   rows: ExtractedLine[];
   /** Effective tax rate derived from a per-line tax column, if the table had one. */
   taxPct?: number;
+  note?: string;
 }
 
 function assembleRows(lines: SourceLine[]): Assembled {
@@ -480,6 +524,8 @@ function assembleRows(lines: SourceLine[]): Assembled {
 
   let taxTotal = 0;
   let netTotal = 0;
+  // How many rows print a total that already carries their tax.
+  let taxInclusiveRows = 0;
 
   // Where the row's description began, which is not always where its figures
   // are: a description on its own band leaves the numbers indented into the
@@ -685,6 +731,13 @@ function assembleRows(lines: SourceLine[]): Assembled {
     netTotal += net;
     taxTotal += values.tax * values.quantity;
 
+    // Keep the document's own figure whenever it disagrees with quantity x rate.
+    const differs = Math.abs(values.amount - net) / Math.max(net, 1) > 0.01;
+    const printedAmount = differs ? values.amount : undefined;
+    if (differs && Math.abs(values.amount - (net + values.tax * values.quantity)) <= 0.01) {
+      taxInclusiveRows += 1;
+    }
+
     rows.push({
       srNo: rows.length + 1,
       description: finalDescription,
@@ -692,8 +745,9 @@ function assembleRows(lines: SourceLine[]): Assembled {
       quantity: values.quantity,
       rate: values.rate,
       amount: net,
+      printedAmount,
       confidence: {
-        description: finalDescription.length > 18 ? 0.95 : 0.78,
+        description: describeConfidence(finalDescription),
         // A midpoint taken from a stated range is derived, not printed, and is
         // held below the review threshold so a human confirms it.
         quantity: sawRange ? 0.7 : values.reconciles ? 0.97 : 0.62,
@@ -715,7 +769,7 @@ function assembleRows(lines: SourceLine[]): Assembled {
   stripSerialColumn(rows);
 
   for (const row of rows) {
-    row.confidence.description = row.description.length > 18 ? 0.95 : 0.78;
+    row.confidence.description = describeConfidence(row.description);
   }
 
   // A per-line tax column gives the real effective rate, which beats assuming
@@ -723,7 +777,12 @@ function assembleRows(lines: SourceLine[]): Assembled {
   const taxPct =
     taxTotal > 0 && netTotal > 0 ? Math.round((taxTotal / netTotal) * 10000) / 100 : undefined;
 
-  return { rows, taxPct };
+  const note =
+    taxInclusiveRows > 0
+      ? `GST appears to be included in the line totals printed on this document (${taxInclusiveRows} of ${rows.length} rows). Quantity x unit price therefore differs from the printed line total. Benchmarking uses the pre-tax unit price, and tax is applied once at the document level.`
+      : undefined;
+
+  return { rows, taxPct, note };
 }
 
 export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResult> {
@@ -789,6 +848,8 @@ export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResul
     documentNumber: docNo,
     taxPct: assembled.taxPct ?? (taxMatch ? Number(taxMatch[1]) : 18),
     needsOcr,
+    note: assembled.note,
+    language: detectLanguage(body),
     sampleText: body.slice(0, 600),
   };
 }

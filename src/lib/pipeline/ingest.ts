@@ -191,6 +191,15 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
   }
 
   checks.push({
+    id: "pricing",
+    label: "Market pricing",
+    passed: services.pricing.live,
+    detail: services.pricing.live
+      ? `Live pricing via ${services.pricing.provider}`
+      : "No pricing provider configured — lines are benchmarked against the rate library only, and lines with no rate-book match carry no verdict",
+  });
+
+  checks.push({
     id: "relevance",
     label: "Business document check",
     passed: true,
@@ -220,6 +229,8 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       taxPct: extracted?.taxPct ?? 18,
       qualityPassed: true,
       qualityScore: score,
+      extractionNote: extracted?.note ?? null,
+      language: extracted?.language ?? null,
       qualityChecks: {
         create: checks.map((check, position) => ({
           key: check.id,
@@ -282,6 +293,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
         quantity: line.quantity,
         rate: line.rate,
         amount: line.amount,
+        printedAmount: line.printedAmount ?? null,
         confDescription: line.confidence.description,
         confQuantity: line.confidence.quantity,
         confRate: line.confidence.rate,
@@ -294,6 +306,14 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
 
     // Market pricing is best-effort: a provider outage must not cost the whole
     // document, it just leaves the line benchmarked on the SoR alone.
+    //
+    // And only a real provider is consulted. The mock synthesises plausible
+    // quotes around a baseline, which is fine for a seeded demonstration and
+    // actively harmful on a document someone intends to act on: a line with no
+    // rate-book match would be handed a fabricated market price and a confident
+    // verdict drawn from it. Better to report no benchmark than a made-up one.
+    if (!services.pricing.live) continue;
+
     try {
       const quotes = await services.pricing.search({
         description: line.description,

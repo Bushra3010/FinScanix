@@ -92,7 +92,13 @@ export interface LineItem {
   quantity: number;
   /** Rate as printed on the vendor document. */
   rate: number;
+  /** quantity x rate, before tax. */
   amount: number;
+  /**
+   * The line total exactly as the document prints it, present only when it
+   * disagrees with quantity x rate — a tax-inclusive amount column, usually.
+   */
+  printedAmount?: number;
   confidence: FieldConfidence;
   /** True once a human has edited an extracted field. */
   corrected?: boolean;
@@ -162,6 +168,10 @@ export interface Invoice {
   pageCount: number;
   /** True when the uploaded original was retained and can be downloaded. */
   hasOriginal: boolean;
+  /** Why the document's own figures differ from the derived ones, where they do. */
+  extractionNote?: string;
+  /** Script(s) detected while reading the document. */
+  language?: string;
   quality: QualityReport;
   subtotal: number;
   taxPct: number;

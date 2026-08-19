@@ -68,6 +68,7 @@ function toLineItem(row: InvoiceRow["lineItems"][number]): LineItem {
     quantity: row.quantity,
     rate: row.rate,
     amount: row.amount,
+    printedAmount: row.printedAmount ?? undefined,
     confidence: {
       description: row.confDescription,
       quantity: row.confQuantity,
@@ -138,6 +139,8 @@ function toInvoice(row: InvoiceRow): Invoice {
     fileSizeKb: row.fileSizeKb,
     pageCount: row.pageCount,
     hasOriginal: row.storageKey !== null,
+    extractionNote: row.extractionNote ?? undefined,
+    language: row.language ?? undefined,
     quality: toQualityReport(row),
     // Totals are derived, never stored — the line items are the only source of
     // truth, so a corrected line can never leave a stale total behind.

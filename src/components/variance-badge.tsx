@@ -34,6 +34,37 @@ export function VarianceBadge({
   );
 }
 
+/**
+ * The same verdict said in procurement's words rather than the engine's.
+ *
+ * "Over" and "under" describe the arithmetic; a buyer deciding whether to
+ * approve a line wants to know whether the price is competitive. Same flag,
+ * same threshold — only the wording differs.
+ */
+export function HealthBadge({
+  flag,
+  unmatched,
+  className,
+}: {
+  flag: VarianceFlag;
+  unmatched?: boolean;
+  className?: string;
+}) {
+  if (unmatched) {
+    return (
+      <Badge tone="outline" className={className}>
+        No benchmark
+      </Badge>
+    );
+  }
+  const label = flag === "over" ? "High" : flag === "under" ? "Below market" : "Competitive";
+  return (
+    <Badge tone={flag} className={className}>
+      {label}
+    </Badge>
+  );
+}
+
 /** Coloured, signed percentage — the most repeated figure in the product. */
 export function VariancePct({
   value,

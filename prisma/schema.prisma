@@ -168,6 +168,10 @@ model Invoice {
   taxPct         Float
   /// Object key in Supabase Storage. Null when the original was not retained.
   storageKey     String?
+  /// Why the document's own figures differ from the derived ones, where they do.
+  extractionNote String?
+  /// Script(s) detected in the text layer.
+  language       String?
 
   // Quality gate outcome — FR-1.2
   qualityPassed   Boolean
@@ -216,6 +220,8 @@ model LineItem {
   quantity    Float
   rate        Float
   amount      Float
+  /// The line total as printed, when it differs from quantity x rate.
+  printedAmount Float?
 
   // Per-field OCR confidence — FR-2.3
   confDescription Float @default(1)
