@@ -1,0 +1,14 @@
+# Build output and dependencies are produced on the builder, not uploaded.
+node_modules
+.next
+out
+build
+
+# Local-only
+.git
+.env
+.env.*
+*.log
+tsconfig.tsbuildinfo
+.DS_Store
+.claude
