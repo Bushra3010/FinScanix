@@ -180,6 +180,42 @@ locked while the data sits in the RSC payload. There is a check for this in
 
 ---
 
+## Scope of work — item by item
+
+| SoW item | State | Where |
+|---|---|---|
+| Frontend & backend integration | Done | Next.js App Router, server actions throughout |
+| PDF & OCR processing pipeline | Done for PDFs; OCR needs a key | `lib/extraction/pdf.ts`, `lib/extraction/vision.ts` |
+| Database & pricing matching | SoR done; market pricing needs `SERPER_API_KEY` | `lib/matching/sor.ts`, `adapters/live.ts` |
+| Valuation engine (Over/Under/Par) | Done, deterministic | `lib/variance.ts` |
+| Authentication & RBAC | Done, enforced before the query | `lib/auth/` |
+| Deployment | Done | Railway + Supabase |
+| Custom domain mapping | **Blocked — needs your domain and DNS** | — |
+| Design overhaul | Done | — |
+| AI assistant, domain-restricted | Guard done; answers need `ANTHROPIC_API_KEY` | `lib/assistant.ts` |
+| Fallback message, exact wording | Done | `OUT_OF_DOMAIN_REPLY` |
+| Page structuring | Done | `app/` |
+| Subscription-driven UI | Done, entitlement-gated server-side | `lib/data/org.ts` |
+| Dashboard & reporting | Done, with PDF/Excel export | `app/app/dashboard`, `api/invoices/[id]/export` |
+| Filter out dirty images | Done | `lib/extraction/image-quality.ts` |
+| Cache memory | Done, tag-invalidated | `lib/db/queries.ts` |
+| Delete one document, not the workspace | Done, verified | `lib/invoices/actions.ts` |
+| Data retention policy | Done, nightly job | `lib/jobs/run.ts` |
+| SoR seeded from CPWD/State PWD | **Illustrative figures only — needs a licensed book** | `lib/data/reference.ts` |
+| Location-wise city index | Done, detected from the document | `lib/extraction/locate.ts` |
+| Hybrid update: cron + bulk upload | Done, CSV and .xlsx | `lib/jobs/`, `lib/rates/actions.ts` |
+| Modular pricing for future feeds | Done, adapter interface | `lib/adapters/` |
+| Real-time pricing (Serper/IndiaMART/Moglix) | Written, inactive — needs `SERPER_API_KEY` | `adapters/live.ts` |
+| Price updating logic | Done, scheduled | `lib/jobs/run.ts` |
+| Payment gateway | Checkout + webhook done — needs Razorpay keys | `api/webhooks/razorpay` |
+| Security & data protection | scrypt, DB sessions, RBAC before query, signed URLs, HMAC webhooks | — |
+
+**Three things are not code and remain with the owner:** a licensed rate book,
+a domain for DNS mapping, and the provider keys (Serper, Anthropic, Razorpay).
+Everything they gate is written and switches on when the key is set.
+
+---
+
 ## What is real, and what is waiting on a key
 
 **Working end to end, verified against the deployment:**
@@ -210,8 +246,23 @@ locked while the data sits in the RSC payload. There is a check for this in
   correcting a line re-runs it immediately.
 - **Exports.** Real PDF and XLSX files, generated server-side.
 - **Scheduled jobs.** A five-field cron reader evaluated in IST, a runner for
-  price refresh / stale sweep / rate-book revision checks, and a
+  price refresh / stale sweep / rate-book revision / retention, and a
   bearer-authenticated `/api/cron` endpoint that runs whatever is due.
+- **Image quality gate.** Uploaded photographs and scans are measured before
+  OCR — resolution, focus by Laplacian variance, tonal range and ink coverage —
+  from the pixels, with no model and no network call. A page that cannot be read
+  is refused with the reason, rather than extracted into something plausible and
+  wrong.
+- **Payment webhook.** `POST /api/webhooks/razorpay`, HMAC-verified over the raw
+  body, is the only thing that activates a paid tier. Redelivered captures are
+  no-ops; an unconfigured secret returns 503 rather than leaving the endpoint
+  open.
+- **Location detection.** A PIN printed on the document decides which city index
+  prices it, overriding the upload default when the two disagree, and the choice
+  is correctable on the report — which re-indexes every matched line.
+- **Caching.** The public rate book is cached across requests and dropped on any
+  write. Only shared rows are cached; tenant rates are read fresh and merged, so
+  one tenant's rates cannot be served to another.
 
 **Code-complete, but inactive without a credential** — each is selected by
 credential availability in [adapters/index.ts](src/lib/adapters/index.ts), so
