@@ -11,6 +11,7 @@ import {
   razorpayPayments,
   serperPricingSearch,
 } from "./live";
+import { visionConfigured, visionProvider } from "@/lib/extraction/vision";
 import type {
   Adapter,
   AssistantAdapter,
@@ -56,19 +57,45 @@ export interface ServiceStatus {
   adapter: Adapter;
 }
 
+/**
+ * Two entries describe work the pipeline does itself rather than through an
+ * adapter, and reading their status off the vestigial mock adapter told the
+ * admin screen the opposite of the truth.
+ *
+ * The quality gate runs locally on the uploaded pixels and needs no credential,
+ * so it is always live. Extraction reads a PDF's text layer locally — also
+ * always — and reaches for a provider only when a page has no text to read, so
+ * it is live once either OCR key exists.
+ */
+const localQualityGate: Adapter = {
+  id: "qualityGate",
+  provider: "Local pixel analysis",
+  live: true,
+  requiredEnv: [],
+};
+
+const extractionStatus: Adapter = {
+  id: "extraction",
+  provider: visionConfigured()
+    ? `Text layer (local) + OCR via ${visionProvider()}`
+    : "Text layer (local); no OCR provider for scans",
+  live: visionConfigured(),
+  requiredEnv: ["ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY"],
+};
+
 /** Rendered on the admin integrations screen. */
 export const SERVICE_STATUS: ServiceStatus[] = [
   {
     key: "qualityGate",
     name: "Image quality gate",
     requirement: "FR-1.2 — reject dirty scans and out-of-scope files",
-    adapter: services.qualityGate,
+    adapter: localQualityGate,
   },
   {
     key: "extraction",
     name: "PDF / OCR extraction",
     requirement: "FR-2.1 — line items, quantities, rates, totals",
-    adapter: services.extraction,
+    adapter: extractionStatus,
   },
   {
     key: "pricing",
