@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./client";
 import { analyseLines, summarise } from "@/lib/variance";
@@ -205,9 +206,38 @@ export async function deleteInvoice(organisationId: string, id: string) {
  * Reference data
  * ------------------------------------------------------------------ */
 
-export async function listCities(): Promise<City[]> {
+/**
+ * Reference and rate data is cached across requests, not just within one.
+ *
+ * The rate book is the heaviest read in the application and the least
+ * volatile: every upload matches every line against the whole of it, and the
+ * seeded book is only the beginning — a licensed CPWD edition runs to tens of
+ * thousands of rows. Re-reading that per document is load with nothing to show
+ * for it.
+ *
+ * Correctness comes from tags rather than from a timer. An import or an edit
+ * revalidates the tag, so the next read sees the change immediately; the long
+ * duration is a backstop for anything that changes the table without going
+ * through those paths.
+ */
+export const CACHE_TAGS = { cities: "cities", rates: "rates" } as const;
+
+async function readCities(): Promise<City[]> {
   const rows = await prisma.city.findMany({ orderBy: { name: "asc" } });
   return rows.map(toCity);
+}
+
+const cachedCities = unstable_cache(readCities, ["cities"], {
+  tags: [CACHE_TAGS.cities],
+  revalidate: 3600,
+});
+
+export async function listCities(): Promise<City[]> {
+  try {
+    return await cachedCities();
+  } catch {
+    return readCities();
+  }
 }
 
 export async function getCity(id: string): Promise<City | null> {
@@ -219,31 +249,76 @@ export async function getCity(id: string): Promise<City | null> {
  * The shared rate book plus this tenant's own entries. A tenant's negotiated
  * rate takes priority over the public book on a code collision.
  */
-export async function listSorEntries(organisationId: string): Promise<SorEntry[]> {
-  const rows = await prisma.sorEntry.findMany({
-    where: { OR: [{ organisationId: null }, { organisationId }] },
+/**
+ * The shared public rate book. Cached; contains no tenant data by construction.
+ *
+ * Only the rows with no organisationId are cached, and a tenant's own rates are
+ * read fresh and merged on top. That split is deliberate: it puts the heavy,
+ * near-static read behind the cache while making it impossible for one tenant's
+ * rates to be served to another, whatever the cache key turns out to be. A
+ * correctness property worth more than the handful of rows it costs.
+ */
+function readPublicRateBook() {
+  return prisma.sorEntry.findMany({
+    where: { organisationId: null },
     orderBy: [{ chapter: "asc" }, { code: "asc" }],
   });
+}
 
-  const byCode = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) {
-    const existing = byCode.get(row.code);
-    if (!existing || (row.organisationId !== null && existing.organisationId === null)) {
-      byCode.set(row.code, row);
-    }
+const cachedPublicRateBook = unstable_cache(readPublicRateBook, ["public-rate-book"], {
+  tags: [CACHE_TAGS.rates],
+  revalidate: 3600,
+});
+
+/**
+ * The cache is an optimisation, so it is never allowed to be a dependency.
+ *
+ * unstable_cache needs Next's request context and throws without it — which is
+ * the situation in a seed, a migration script, or a job run outside a request.
+ * Falling back to the direct read there keeps those paths working; the cost of
+ * a cache miss is a query, and the cost of an exception would be a failed
+ * upload.
+ */
+async function publicRateBook() {
+  try {
+    return await cachedPublicRateBook();
+  } catch {
+    return readPublicRateBook();
   }
+}
 
-  return [...byCode.values()].map((row) => ({
-    id: row.id,
-    code: row.code,
-    description: row.description,
-    unit: row.unit,
-    baseRate: row.baseRate,
-    source: row.source,
-    chapter: row.chapter,
-    effectiveFrom: row.effectiveFrom.toISOString(),
-    owned: row.organisationId !== null,
-  }));
+/**
+ * The shared rate book plus this tenant's own entries. A tenant's negotiated
+ * rate takes priority over the public book on a code collision.
+ */
+export async function listSorEntries(organisationId: string): Promise<SorEntry[]> {
+  const [shared, owned] = await Promise.all([
+    publicRateBook(),
+    prisma.sorEntry.findMany({
+      where: { organisationId },
+      orderBy: [{ chapter: "asc" }, { code: "asc" }],
+    }),
+  ]);
+
+  const byCode = new Map<string, (typeof shared)[number]>();
+  for (const row of shared) byCode.set(row.code, row);
+  // The tenant's own entry wins on a collision, which is the whole point of
+  // being able to add one.
+  for (const row of owned) byCode.set(row.code, row);
+
+  return [...byCode.values()]
+    .sort((a, b) => a.chapter.localeCompare(b.chapter) || a.code.localeCompare(b.code))
+    .map((row) => ({
+      id: row.id,
+      code: row.code,
+      description: row.description,
+      unit: row.unit,
+      baseRate: row.baseRate,
+      source: row.source,
+      chapter: row.chapter,
+      effectiveFrom: row.effectiveFrom.toISOString(),
+      owned: row.organisationId !== null,
+    }));
 }
 
 /* ------------------------------------------------------------------ *

@@ -1,8 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { prisma } from "@/lib/db/client";
 import { requireEntitlement, requirePermission } from "@/lib/auth/guard";
+import { CACHE_TAGS } from "@/lib/db/queries";
+import ExcelJS from "exceljs";
 
 /**
  * Rate library management — FR-9.1.
@@ -83,7 +85,53 @@ function parseCsv(text: string): string[][] {
   return rows.filter((entry) => entry.some((cell) => cell.trim() !== ""));
 }
 
-/** Bulk rate import from CSV — FR-9.1. */
+/**
+ * Reads the first worksheet of an .xlsx workbook into the same row-and-cell
+ * shape the CSV reader produces.
+ *
+ * Rate books arrive as spreadsheets far more often than as CSV — that is what
+ * a PWD department or a supplier actually sends — and asking someone to export
+ * to CSV first is asking them to introduce encoding and separator problems
+ * that this avoids entirely. Cell values are normalised to text so a date or a
+ * formula result is read as what it displays.
+ */
+async function parseWorkbook(buffer: ArrayBuffer): Promise<string[][]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  const rows: string[][] = [];
+  sheet.eachRow({ includeEmpty: false }, (row) => {
+    const cells: string[] = [];
+    // eachCell skips empty cells, which would shift every column after a gap.
+    // Walking the index range keeps the row aligned with its header.
+    for (let i = 1; i <= sheet.columnCount; i++) {
+      const value = row.getCell(i).value;
+      if (value === null || value === undefined) {
+        cells.push("");
+      } else if (value instanceof Date) {
+        cells.push(value.toISOString().slice(0, 10));
+      } else if (typeof value === "object") {
+        // Formula results, rich text and hyperlinks all carry their display
+        // text on a different key.
+        const cell = value as { result?: unknown; text?: string; richText?: { text: string }[] };
+        if (cell.richText) cells.push(cell.richText.map((part) => part.text).join(""));
+        else if (cell.text !== undefined) cells.push(String(cell.text));
+        else if (cell.result !== undefined) cells.push(String(cell.result));
+        else cells.push("");
+      } else {
+        cells.push(String(value));
+      }
+    }
+    rows.push(cells);
+  });
+
+  return rows.filter((row) => row.some((cell) => cell.trim() !== ""));
+}
+
+/** Bulk rate import from CSV or Excel — FR-9.1. */
 export async function importRatesAction(
   _prev: RateActionState,
   formData: FormData,
@@ -93,13 +141,35 @@ export async function importRatesAction(
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { error: "Choose a CSV file to import." };
+    return { error: "Choose a CSV or Excel file to import." };
   }
   if (file.size > 5 * 1024 * 1024) {
     return { error: "Rate files are limited to 5 MB (roughly 40,000 rows)." };
   }
 
-  const rows = parseCsv(await file.text());
+  const isWorkbook =
+    /\.xlsx$/i.test(file.name) ||
+    file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+  let rows: string[][];
+  if (isWorkbook) {
+    try {
+      rows = await parseWorkbook(await file.arrayBuffer());
+    } catch {
+      return {
+        error:
+          "That workbook could not be opened. Save it as .xlsx (not the older .xls) and try again, or export it as CSV.",
+      };
+    }
+  } else if (/\.xls$/i.test(file.name)) {
+    return {
+      error:
+        "The older .xls format is not supported. Open it in Excel and save as .xlsx, or export as CSV.",
+    };
+  } else {
+    rows = parseCsv(await file.text());
+  }
+
   if (rows.length < 2) {
     return { error: "That file has a header but no data rows." };
   }
@@ -215,6 +285,8 @@ export async function importRatesAction(
     },
   });
 
+  // The cached rate book is now stale; matching must not go on using it.
+  revalidateTag(CACHE_TAGS.rates);
   revalidatePath("/app/admin/rates");
   revalidatePath("/app/admin/uploads");
 
@@ -279,6 +351,7 @@ export async function saveRateAction(
     },
   });
 
+  revalidateTag(CACHE_TAGS.rates);
   revalidatePath("/app/admin/rates");
   return { ok: true };
 }
@@ -306,6 +379,7 @@ export async function deleteRateAction(formData: FormData) {
     });
   }
 
+  revalidateTag(CACHE_TAGS.rates);
   revalidatePath("/app/admin/rates");
   return { ok: deleted.count > 0 };
 }

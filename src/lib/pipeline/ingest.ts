@@ -2,10 +2,15 @@ import { prisma } from "@/lib/db/client";
 import { services } from "@/lib/adapters";
 import { extractFromPdf, type ExtractedLine } from "@/lib/extraction/pdf";
 import { extractFromImage, visionConfigured } from "@/lib/extraction/vision";
+import { assessImage } from "@/lib/extraction/image-quality";
+import { detectLocation } from "@/lib/extraction/locate";
 import { matchSor } from "@/lib/matching/sor";
 import { listSorEntries } from "@/lib/db/queries";
 import { documentKey, putDocument, storageConfigured } from "@/lib/storage";
+import { CITIES } from "@/lib/data/reference";
 import type { QualityCheck } from "@/lib/types";
+
+const getCityName = (id: string) => CITIES.find((city) => city.id === id)?.name ?? id;
 
 /**
  * The ingestion pipeline: one uploaded file to a stored, extracted, matched and
@@ -86,8 +91,28 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     };
   }
 
-  // ── Gate 2: can we actually read the content? ───────────────────────────
+  // ── Gate 2: is an uploaded image good enough to read? ───────────────────
+  //
+  // Only images. A PDF's text layer is exact or absent; a photograph can be
+  // legible, marginal or useless, and the marginal case is the dangerous one —
+  // it extracts something, and the something is wrong.
   const isPdf = input.mimeType === "application/pdf";
+
+  if (!isPdf) {
+    const image = assessImage(original, input.mimeType);
+    checks.push(
+      ...image.metrics.map((metric) => ({
+        id: metric.id,
+        label: metric.label,
+        passed: metric.passed,
+        detail: metric.detail,
+      })),
+    );
+    if (!image.usable) {
+      return { ok: false, rejection: { reason: image.reason ?? "This image is not usable.", checks } };
+    }
+  }
+
   let extracted: Awaited<ReturnType<typeof extractFromPdf>> | null = null;
 
   if (isPdf) {
@@ -208,6 +233,38 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       : "Itemised billing table detected",
   });
 
+  // ── Where is this work? ─────────────────────────────────────────────────
+  //
+  // The city sets the index factor applied to every benchmark rate, so it moves
+  // every verdict on the document. A PIN printed on the bill is better evidence
+  // than a dropdown nobody remembered to change, and is used when the two
+  // disagree — but only a PIN, which is unambiguous. A city name might be the
+  // vendor's own address rather than the site, so that is reported and not
+  // acted on.
+  let cityId = input.cityId;
+  const located = detectLocation(extracted?.sampleText ?? "");
+  const locationNotes: string[] = [];
+
+  if (located && located.basis === "pin" && located.cityId !== input.cityId) {
+    cityId = located.cityId;
+    locationNotes.push(
+      `Priced against ${getCityName(located.cityId)} rather than the selected location: the document carries ${located.evidence}. Change it on the report if the work is elsewhere.`,
+    );
+  } else if (located && located.basis === "name" && located.cityId !== input.cityId) {
+    locationNotes.push(
+      `This document mentions ${located.evidence}, but it has been priced against the location you selected. Change it on the report if the work is in ${located.evidence}.`,
+    );
+  }
+
+  checks.push({
+    id: "location",
+    label: "Location",
+    passed: true,
+    detail: located
+      ? `${getCityName(cityId)} — from ${located.evidence}`
+      : `${getCityName(cityId)} — as selected; no location found in the document`,
+  });
+
   // ── Persist ─────────────────────────────────────────────────────────────
   const passedCount = checks.filter((c) => c.passed).length;
   const score = passedCount / checks.length;
@@ -220,7 +277,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       vendor: extracted?.vendor ?? "Unidentified vendor",
       vendorGstin: extracted?.vendorGstin ?? "—",
       project: input.project,
-      cityId: input.cityId,
+      cityId,
       uploadedById: input.userId,
       status: "extracting",
       fileName: input.fileName,
@@ -229,7 +286,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       taxPct: extracted?.taxPct ?? 18,
       qualityPassed: true,
       qualityScore: score,
-      extractionNote: extracted?.note ?? null,
+      extractionNote: [extracted?.note, ...locationNotes].filter(Boolean).join(" ") || null,
       language: extracted?.language ?? null,
       qualityChecks: {
         create: checks.map((check, position) => ({
@@ -270,7 +327,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
   // ── Match and price ─────────────────────────────────────────────────────
   const [sorEntries, city] = await Promise.all([
     listSorEntries(input.organisationId),
-    prisma.city.findUnique({ where: { id: input.cityId } }),
+    prisma.city.findUnique({ where: { id: cityId } }),
   ]);
   const indexFactor = city?.indexFactor ?? 1;
 
@@ -318,7 +375,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       const quotes = await services.pricing.search({
         description: line.description,
         unit: line.unit,
-        cityId: input.cityId,
+        cityId,
         limit: 3,
       });
 

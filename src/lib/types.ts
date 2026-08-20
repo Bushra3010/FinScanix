@@ -263,7 +263,7 @@ export interface RateUpload {
 }
 
 /** Scheduled market-price refresh — FR-9.2. */
-export type CronKind = "price_refresh" | "sor_revision" | "stale_sweep";
+export type CronKind = "price_refresh" | "sor_revision" | "stale_sweep" | "retention";
 
 export interface CronJob {
   id: string;

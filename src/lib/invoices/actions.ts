@@ -182,3 +182,59 @@ export async function deleteInvoiceAction(formData: FormData) {
   revalidatePath("/app/dashboard");
   redirect("/app/invoices");
 }
+
+/**
+ * Re-prices a document against a different city — SoW section 3.
+ *
+ * The city index multiplies every benchmark rate, so changing it is not a label
+ * change: each matched line's adjusted rate has to be recomputed, or the report
+ * would show one city and benchmark against another. Extracted figures are left
+ * exactly as they are — only the reference rates move.
+ */
+export async function setInvoiceCityAction(formData: FormData) {
+  const user = await requirePermission("invoice.correct");
+
+  const invoiceId = String(formData.get("invoiceId") ?? "");
+  const cityId = String(formData.get("cityId") ?? "");
+
+  const [invoice, city] = await Promise.all([
+    prisma.invoice.findFirst({
+      where: { id: invoiceId, organisationId: user.organisation.id },
+      include: { lineItems: { include: { sorEntry: true } } },
+    }),
+    prisma.city.findUnique({ where: { id: cityId } }),
+  ]);
+
+  if (!invoice) return { error: "That document is not in your organisation." };
+  if (!city) return { error: "Choose a valid location." };
+  if (invoice.cityId === cityId) return { ok: true };
+
+  await prisma.$transaction([
+    prisma.invoice.update({ where: { id: invoice.id }, data: { cityId } }),
+    ...invoice.lineItems
+      .filter((line) => line.sorEntry !== null)
+      .map((line) =>
+        prisma.lineItem.update({
+          where: { id: line.id },
+          data: {
+            sorIndexFactor: city.indexFactor,
+            sorAdjustedRate:
+              Math.round(line.sorEntry!.baseRate * city.indexFactor * 100) / 100,
+          },
+        }),
+      ),
+  ]);
+
+  await prisma.activityEvent.create({
+    data: {
+      organisationId: user.organisation.id,
+      invoiceId: invoice.id,
+      kind: "correction",
+      actor: user.name,
+      message: `Re-priced ${invoice.number} against ${city.name} (index x${city.indexFactor.toFixed(2)})`,
+    },
+  });
+
+  revalidatePath(`/app/invoices/${invoice.id}`);
+  return { ok: true };
+}

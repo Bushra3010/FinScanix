@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveLineCorrectionAction } from "@/lib/invoices/actions";
+import { saveLineCorrectionAction, setInvoiceCityAction } from "@/lib/invoices/actions";
 import {
   Check,
   ChevronDown,
@@ -23,7 +23,7 @@ import { Table, TableWrap, TBody, TD, TH, THead } from "@/components/ui/table";
 import { HealthBadge, VarianceBadge, VariancePct } from "@/components/variance-badge";
 import { useSession } from "@/components/app/session-context";
 import { analyseLines, summarise, VARIANCE_CONFIG } from "@/lib/variance";
-import type { AnalysedInvoice, LineItem, VarianceFlag } from "@/lib/types";
+import type { AnalysedInvoice, City, LineItem, VarianceFlag } from "@/lib/types";
 import { cn, formatINR, formatNumber, relativeTime } from "@/lib/utils";
 
 const NOW = new Date("2026-08-14T10:00:00+05:30");
@@ -31,8 +31,15 @@ const LOW_CONFIDENCE = 0.8;
 
 type FilterKey = "all" | VarianceFlag | "unmatched";
 
-export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
+export function InvoiceReport({
+  invoice,
+  cities,
+}: {
+  invoice: AnalysedInvoice;
+  cities: City[];
+}) {
   const { allows, entitled } = useSession();
+  const [repricing, startRepricing] = useTransition();
 
   // Corrections are held locally; the variance engine re-runs on every edit so
   // the effect of a correction is visible immediately — FR-2.3 into FR-5.2.
@@ -147,6 +154,41 @@ export function InvoiceReport({ invoice }: { invoice: AnalysedInvoice }) {
         <Fact label="Extraction confidence" value={extractionConfidence} />
         {invoice.language && <Fact label="Language" value={invoice.language} />}
         <Fact label="Pages" value={String(invoice.pageCount)} />
+        <div>
+          <p className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
+            Priced for
+          </p>
+          {allows("invoice.correct") ? (
+            <select
+              value={invoice.cityId}
+              disabled={repricing}
+              aria-label="Location this document is benchmarked against"
+              onChange={(event) => {
+                const data = new FormData();
+                data.set("invoiceId", invoice.id);
+                data.set("cityId", event.target.value);
+                startRepricing(async () => {
+                  await setInvoiceCityAction(data);
+                  router.refresh();
+                });
+              }}
+              className="mt-0.5 cursor-pointer rounded-md border border-border-strong bg-surface px-2 py-0.5 text-[14px] font-semibold text-foreground focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none disabled:opacity-60"
+            >
+              {cities.map((city) => (
+                <option key={city.id} value={city.id}>
+                  {city.name} (x{city.indexFactor.toFixed(2)})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-0.5 text-[15px] font-semibold text-foreground">
+              {invoice.city.name}
+              <span className="ml-1.5 text-[11.5px] font-normal text-muted-foreground">
+                x{invoice.city.indexFactor.toFixed(2)}
+              </span>
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Summary */}

@@ -190,6 +190,72 @@ async function checkSorRevisions(organisationId: string): Promise<JobResult> {
   };
 }
 
+/**
+ * Retention windows, in days.
+ *
+ * Deliberately conservative. A rejected upload carries no report and no quota,
+ * so it is housekeeping; an audit trail has to outlive the financial year it
+ * describes. Analysed documents are absent from this list on purpose — they are
+ * the work product, and deleting a customer's reports on a timer is not a
+ * retention policy, it is data loss. Those go when someone deletes them.
+ */
+const RETENTION = {
+  rejectedDocuments: 30,
+  activityTrail: 365,
+} as const;
+
+/**
+ * Enforces the retention policy — SoW section 2, data retention.
+ *
+ * Everything removed here is either expired by definition or unlinked from any
+ * active subscription and any report. What was removed is written back to the
+ * audit trail, so the policy running is itself auditable.
+ */
+async function enforceRetention(organisationId: string): Promise<JobResult> {
+  const now = Date.now();
+  const day = 24 * 60 * 60_000;
+
+  // Sessions past their expiry are already invalid; keeping the rows only
+  // widens what a database leak would expose.
+  const sessions = await prisma.session.deleteMany({
+    where: { user: { organisationId }, expiresAt: { lt: new Date(now) } },
+  });
+
+  const rejected = await prisma.invoice.deleteMany({
+    where: {
+      organisationId,
+      status: "rejected",
+      uploadedAt: { lt: new Date(now - RETENTION.rejectedDocuments * day) },
+    },
+  });
+
+  const activity = await prisma.activityEvent.deleteMany({
+    where: { organisationId, at: { lt: new Date(now - RETENTION.activityTrail * day) } },
+  });
+
+  const removed = sessions.count + rejected.count + activity.count;
+
+  if (removed > 0) {
+    await prisma.activityEvent.create({
+      data: {
+        organisationId,
+        kind: "rate_update",
+        actor: "Retention policy",
+        message: `Purged ${sessions.count} expired session(s), ${rejected.count} rejected upload(s) older than ${RETENTION.rejectedDocuments} days, and ${activity.count} audit entries older than ${RETENTION.activityTrail} days`,
+      },
+    });
+  }
+
+  return {
+    status: "success",
+    itemsRefreshed: removed,
+    detail:
+      removed === 0
+        ? "Nothing was outside the retention windows."
+        : `Removed ${sessions.count} expired session(s), ${rejected.count} rejected upload(s), ${activity.count} audit entries. Analysed documents are never purged on a timer.`,
+  };
+}
+
 export async function runJob(job: {
   id: string;
   organisationId: string;
@@ -211,6 +277,9 @@ export async function runJob(job: {
         break;
       case "sor_revision":
         result = await checkSorRevisions(job.organisationId);
+        break;
+      case "retention":
+        result = await enforceRetention(job.organisationId);
         break;
       default:
         result = { status: "failed", itemsRefreshed: 0, detail: `Unknown job kind "${job.kind}".` };

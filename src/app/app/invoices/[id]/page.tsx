@@ -21,7 +21,7 @@ import { buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/guard";
 import { deleteInvoiceAction } from "@/lib/invoices/actions";
-import { getInvoice } from "@/lib/db/queries";
+import { getInvoice, listCities } from "@/lib/db/queries";
 import type { AnalysedInvoice } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/utils";
 
@@ -37,7 +37,10 @@ export default async function InvoiceDetailPage({
 
   // Scoped to the tenant: another organisation's document id resolves to a 404
   // rather than leaking that it exists.
-  const invoice = await getInvoice(user.organisation.id, id);
+  const [invoice, cities] = await Promise.all([
+    getInvoice(user.organisation.id, id),
+    listCities(),
+  ]);
   if (!invoice) notFound();
 
   const processing = invoice.status === "extracting" || invoice.status === "queued";
@@ -119,7 +122,7 @@ export default async function InvoiceDetailPage({
       ) : processing ? (
         <ProcessingPanel />
       ) : (
-        <InvoiceReport invoice={invoice} />
+        <InvoiceReport invoice={invoice} cities={cities} />
       )}
     </>
   );

@@ -64,8 +64,8 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
               <div>
                 <CardTitle>Upload a rate file</CardTitle>
                 <CardDescription>
-                  CSV. Every row is validated before anything is written — a bad row is
-                  reported, never silently dropped.
+                  CSV or Excel (.xlsx). Every row is validated before anything is written —
+                  a bad row is reported by line number, never silently dropped.
                 </CardDescription>
               </div>
               <Button type="button" size="sm" variant="outline" onClick={downloadTemplate}>
@@ -97,7 +97,7 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                   <FileSpreadsheet className="h-5 w-5" />
                 </div>
                 <p className="mt-4 text-[14px] font-semibold text-foreground">
-                  {picked ?? "Drop a CSV file"}
+                  {picked ?? "Drop a CSV or Excel file"}
                 </p>
                 <p className="mt-1 text-[12.5px] text-muted-foreground">
                   Up to 5 MB — roughly 40,000 rows
@@ -115,7 +115,7 @@ export function BulkRateUpload({ uploads }: { uploads: RateUpload[] }) {
                   ref={inputRef}
                   name="file"
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   className="hidden"
                   onChange={(event) => take(event.target.files)}
                 />

@@ -437,6 +437,19 @@ export const CRON_JOBS: CronJob[] = [
     itemsRefreshed: 96,
     enabled: false,
   },
+  {
+    id: "cron-05",
+    kind: "retention",
+    scope: [],
+    name: "Retention policy sweep",
+    schedule: "0 1 * * *",
+    target: "Expired sessions, rejected uploads over 30 days, audit entries over 365 days",
+    lastRun: "2026-08-17T01:00:00+05:30",
+    nextRun: "2026-08-18T01:00:00+05:30",
+    lastStatus: "success",
+    itemsRefreshed: 0,
+    enabled: true,
+  },
 ];
 
 /** Monthly roll-up powering the dashboard trend chart. */
