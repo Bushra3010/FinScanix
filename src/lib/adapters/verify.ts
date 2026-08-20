@@ -2,7 +2,7 @@
 
 import { requirePermission } from "@/lib/auth/guard";
 import { services } from "./index";
-import { visionConfigured } from "@/lib/extraction/vision";
+import { visionConfigured, visionProvider } from "@/lib/extraction/vision";
 
 /**
  * Live connection tests for each external provider.
@@ -113,15 +113,18 @@ async function testPayments(): Promise<ProviderTest> {
 }
 
 async function testVision(): Promise<ProviderTest> {
-  if (!visionConfigured()) return NOT_CONFIGURED(["ANTHROPIC_API_KEY"]);
-  // The assistant and the vision reader share one credential, so proving one
-  // proves the other; this avoids spending a vision call to learn the same fact.
+  if (!visionConfigured()) {
+    return NOT_CONFIGURED(["ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY"]);
+  }
+  // Vision and the assistant share one credential per provider, so proving the
+  // credential once proves both; this avoids spending a vision call — the more
+  // expensive of the two — to learn the same fact.
   const assistant = await testAssistant();
   return {
     ok: assistant.ok,
     live: true,
     detail: assistant.ok
-      ? "ANTHROPIC_API_KEY is accepted, so scanned pages and photographs can be read."
+      ? `${visionProvider()} is accepted, so scanned pages and photographs can be read.`
       : assistant.detail,
   };
 }

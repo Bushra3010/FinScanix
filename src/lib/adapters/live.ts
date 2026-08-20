@@ -236,3 +236,56 @@ export const claudeAssistant: AssistantAdapter = {
     }
   },
 };
+
+/* ------------------------------------------------------------------ *
+ * Assistant — Google AI Studio (Gemini), behind the same domain guard
+ * ------------------------------------------------------------------ */
+
+export const geminiAssistant: AssistantAdapter = {
+  id: "assistant",
+  provider: "Google AI Studio (Gemini)",
+  live: true,
+  requiredEnv: ["GOOGLE_AI_API_KEY"],
+
+  async ask({ question, history }) {
+    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) throw new NotConfiguredError("Google AI Studio", ["GOOGLE_AI_API_KEY"]);
+
+    // The same cheap pre-filter the Claude path uses: an obviously off-topic
+    // question never reaches the model, which makes the refusal instant, exact,
+    // and free.
+    if (!classifyDomain(question).inDomain) {
+      return { answer: OUT_OF_DOMAIN_REPLY, outOfDomain: true };
+    }
+
+    const { geminiClient, geminiMessage, withGeminiRetry } = await import("@/lib/ai/gemini");
+    const ai = geminiClient();
+
+    try {
+      const response = await withGeminiRetry(() =>
+        ai.models.generateContent({
+        // The free tier has no quota on the Pro models, so flash is the working
+        // path. `-latest` follows Google's current flash rather than pinning a
+        // version that will one day be retired.
+        model: "gemini-flash-latest",
+        contents: [
+          ...history.slice(-8).map((message) => ({
+            role: message.role === "assistant" ? ("model" as const) : ("user" as const),
+            parts: [{ text: message.content }],
+          })),
+          { role: "user" as const, parts: [{ text: question }] },
+        ],
+          config: { systemInstruction: ASSISTANT_SYSTEM },
+        }),
+      );
+
+      const answer = (response.text ?? "").trim();
+      if (!answer) return { answer: answerInDomain(question), outOfDomain: false };
+
+      // The model was given the exact refusal sentence; honour it if it used one.
+      return { answer, outOfDomain: answer === OUT_OF_DOMAIN_REPLY };
+    } catch (error) {
+      throw new Error(geminiMessage(error, "Assistant provider error"));
+    }
+  },
+};

@@ -18,7 +18,7 @@ export const mockQualityGate: QualityGateAdapter = {
   id: "quality-gate",
   provider: "Mock heuristic gate",
   live: false,
-  requiredEnv: ["ANTHROPIC_API_KEY"],
+  requiredEnv: ["ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY"],
 
   async assess({ fileName, sizeKb, mimeType }): Promise<QualityReport> {
     const name = fileName.toLowerCase();
@@ -127,7 +127,7 @@ export const mockExtraction: ExtractionAdapter = {
   id: "extraction",
   provider: "Mock replay (fixture-backed)",
   live: false,
-  requiredEnv: ["ANTHROPIC_API_KEY"],
+  requiredEnv: ["ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY"],
 
   async extract({ cityId }) {
     const template = INVOICES.find((i) => i.id === "inv-0842")!;
@@ -208,7 +208,7 @@ export const mockAssistant: AssistantAdapter = {
   id: "assistant",
   provider: "Domain guard + canned answers",
   live: false,
-  requiredEnv: ["ANTHROPIC_API_KEY"],
+  requiredEnv: ["ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY"],
 
   async ask({ question }) {
     const verdict = classifyDomain(question);

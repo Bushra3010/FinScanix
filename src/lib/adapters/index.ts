@@ -5,7 +5,12 @@ import {
   mockPricingSearch,
   mockQualityGate,
 } from "./mock";
-import { claudeAssistant, razorpayPayments, serperPricingSearch } from "./live";
+import {
+  claudeAssistant,
+  geminiAssistant,
+  razorpayPayments,
+  serperPricingSearch,
+} from "./live";
 import type {
   Adapter,
   AssistantAdapter,
@@ -35,7 +40,13 @@ export const services: {
   extraction: mockExtraction,
   pricing: hasEnv("SERPER_API_KEY") ? serperPricingSearch : mockPricingSearch,
   payments: hasEnv("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET") ? razorpayPayments : mockPayments,
-  assistant: hasEnv("ANTHROPIC_API_KEY") ? claudeAssistant : mockAssistant,
+  // Anthropic first where both are present: the larger model answers better.
+  // Gemini serves when it is the key that exists.
+  assistant: hasEnv("ANTHROPIC_API_KEY")
+    ? claudeAssistant
+    : hasEnv("GOOGLE_AI_API_KEY")
+      ? geminiAssistant
+      : mockAssistant,
 };
 
 export interface ServiceStatus {

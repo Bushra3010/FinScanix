@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ExtractedLine, ExtractionResult } from "./pdf";
+import { extractWithGemini, geminiConfigured } from "./vision-gemini";
 
 /**
  * OCR extraction for scans and photographs — the FR-2.1 path that the text-layer
@@ -77,16 +78,35 @@ type VisionPayload = {
 
 const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
+/** Whether any OCR provider is reachable on this deployment. */
 export function visionConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY) || geminiConfigured();
 }
 
+/** Which one will serve, named for the interface and the quality checks. */
+export function visionProvider(): string | null {
+  if (process.env.ANTHROPIC_API_KEY) return `Anthropic ${MODEL}`;
+  if (geminiConfigured()) return "Google AI Studio (Gemini)";
+  return null;
+}
+
+/**
+ * Reads a scan or photograph through whichever provider is configured.
+ *
+ * Anthropic wins when both keys are present — not out of preference, but
+ * because a document read wrongly is worse than one read slowly, and the larger
+ * model is the more accurate transcriber. Gemini serves when it is the only key
+ * available, which on the free tier means the flash tier.
+ */
 export async function extractFromImage(
   bytes: Uint8Array,
   mimeType: string,
 ): Promise<ExtractionResult> {
-  if (!visionConfigured()) {
-    throw new Error("ANTHROPIC_API_KEY is not set — OCR extraction is unavailable.");
+  if (!process.env.ANTHROPIC_API_KEY) {
+    if (geminiConfigured()) return extractWithGemini(bytes, mimeType);
+    throw new Error(
+      "No OCR provider is configured. Set ANTHROPIC_API_KEY or GOOGLE_AI_API_KEY.",
+    );
   }
 
   const client = new Anthropic();

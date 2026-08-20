@@ -146,13 +146,16 @@ export default function LandingPage() {
                 Built for construction &amp; facilities procurement
               </span>
 
-              <h1 className="mt-7 text-[2.9rem] leading-[1.04] font-bold tracking-tight text-foreground sm:text-[3.4rem]">
-                <span className="block">Smarter rates.</span>
-                <span className="block text-brand">Stronger bids.</span>
+              <h1 className="mt-7 text-[2.6rem] leading-[1.06] font-bold tracking-tight text-foreground sm:text-[3.1rem]">
+                <span className="block">Audit Every Invoice &amp; Quotation.</span>
+                <span className="block text-brand">Control Every Cost.</span>
               </h1>
 
-              <p className="mt-5 max-w-md text-[17px] leading-relaxed text-muted-foreground">
-                Real-time rate verification. Live market pricing. Audit-ready evidence.
+              <p className="mt-5 max-w-xl text-[16px] leading-relaxed text-muted-foreground">
+                FinScanix is an AI-powered procurement intelligence that analyzes vendor invoices
+                and quotations, benchmarks line items against government Schedule of Rates and live
+                local market pricing and flags overcharges to drive data-driven decision making,
+                scope validation, risk mitigation and cost savings — before you approve.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
