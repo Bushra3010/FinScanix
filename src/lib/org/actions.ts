@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db/client";
 import { requirePermission, requireUser } from "@/lib/auth/guard";
 import { hashPassword } from "@/lib/auth/password";
+import { issueInvite, INVITE_TTL_HOURS } from "@/lib/auth/invites";
 import { getTier } from "@/lib/data/org";
 import { CITIES } from "@/lib/data/reference";
 import type { Role } from "@/lib/types";
@@ -15,6 +16,14 @@ export interface OrgActionState {
   error?: string;
   ok?: boolean;
   message?: string;
+  /**
+   * The invitation link, returned to the admin who created it.
+   *
+   * With no email provider connected there is nowhere else for it to go, and an
+   * invitation that reaches nobody is not one. Shown once, on the screen of the
+   * person entitled to create it.
+   */
+  inviteUrl?: string;
 }
 
 const ASSIGNABLE: Role[] = ["admin", "estimator", "auditor", "viewer"];
@@ -53,11 +62,12 @@ export async function inviteMemberAction(
     }
   }
 
-  // The invitee sets their own password; this placeholder is unguessable and
-  // is never a usable credential.
+  // The invitee sets their own password. Until they do, the account holds an
+  // unguessable placeholder that is never a usable credential — not an empty
+  // or default one that would be.
   const placeholder = await hashPassword(randomBytes(32).toString("base64url"));
 
-  await prisma.user.create({
+  const created = await prisma.user.create({
     data: {
       organisationId: user.organisation.id,
       name: email.split("@")[0],
@@ -67,6 +77,10 @@ export async function inviteMemberAction(
       status: "invited",
     },
   });
+
+  const { token } = await issueInvite(created.id);
+  const base = process.env.APP_BASE_URL ?? "";
+  const inviteUrl = `${base}/invite/${token}`;
 
   await prisma.activityEvent.create({
     data: {
@@ -80,8 +94,41 @@ export async function inviteMemberAction(
   revalidatePath("/app/settings/team");
   return {
     ok: true,
-    // Said plainly rather than implying an email went out, because none does yet.
-    message: `${email} added as ${role}. Invitation email delivery is not wired up yet — they cannot sign in until a password is set.`,
+    inviteUrl,
+    // Said plainly rather than implying an email went out, because none does.
+    message: `${email} added as ${role}. No email provider is connected, so send them this link yourself — it works once and expires in ${INVITE_TTL_HOURS} hours.`,
+  };
+}
+
+/**
+ * Issues a fresh invitation link for someone who has not signed in yet.
+ *
+ * Links expire and get lost. Re-issuing invalidates the previous one, so a link
+ * that went astray stops working the moment a replacement is made.
+ */
+export async function reissueInviteAction(formData: FormData): Promise<OrgActionState> {
+  const actor = await requirePermission("users.manage");
+  const userId = String(formData.get("userId") ?? "");
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, organisationId: actor.organisation.id },
+  });
+  if (!target) return { error: "That member is not in your organisation." };
+  if (target.status === "active") {
+    return { error: `${target.email} has already set a password and can sign in.` };
+  }
+  if (target.status === "suspended") {
+    return { error: "Reactivate this member before issuing a new invitation." };
+  }
+
+  const { token } = await issueInvite(target.id);
+  const base = process.env.APP_BASE_URL ?? "";
+
+  revalidatePath("/app/settings/team");
+  return {
+    ok: true,
+    inviteUrl: `${base}/invite/${token}`,
+    message: `New link for ${target.email}. Any previous link has stopped working.`,
   };
 }
 

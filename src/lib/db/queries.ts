@@ -321,6 +321,73 @@ export async function listSorEntries(organisationId: string): Promise<SorEntry[]
     }));
 }
 
+/**
+ * Line items no rate in the library could price — SoW section 3.
+ *
+ * "No benchmark" tells someone the rate book is incomplete without saying what
+ * it is missing, which leaves the one action that would fix it unguided. This
+ * ranks the gaps by the money passing through them, so the next rates to load
+ * are the ones that would price the most spend, not merely the most rows.
+ */
+export interface CoverageGap {
+  description: string;
+  unit: string;
+  occurrences: number;
+  value: number;
+  lastSeen: string;
+}
+
+export async function listCoverageGaps(
+  organisationId: string,
+  limit = 25,
+): Promise<{ gaps: CoverageGap[]; matched: number; unmatched: number }> {
+  const lines = await prisma.lineItem.findMany({
+    where: {
+      invoice: { organisationId, status: { in: ["analysed", "needs_review"] } },
+    },
+    select: {
+      description: true,
+      unit: true,
+      amount: true,
+      sorEntryId: true,
+      invoice: { select: { uploadedAt: true } },
+    },
+  });
+
+  const matched = lines.filter((line) => line.sorEntryId !== null).length;
+  const unmatched = lines.length - matched;
+
+  // Grouped on the leading words rather than the whole string: two vendors
+  // describing the same work rarely word all of it identically, and a list with
+  // one row per phrasing hides how much of the spend is really one gap.
+  const groups = new Map<string, CoverageGap>();
+  for (const line of lines) {
+    if (line.sorEntryId !== null) continue;
+    const key = line.description.toLowerCase().split(/\s+/).slice(0, 6).join(" ");
+    const existing = groups.get(key);
+    const seen = line.invoice.uploadedAt.toISOString();
+    if (existing) {
+      existing.occurrences += 1;
+      existing.value += line.amount;
+      if (seen > existing.lastSeen) existing.lastSeen = seen;
+    } else {
+      groups.set(key, {
+        description: line.description,
+        unit: line.unit,
+        occurrences: 1,
+        value: line.amount,
+        lastSeen: seen,
+      });
+    }
+  }
+
+  return {
+    gaps: [...groups.values()].sort((a, b) => b.value - a.value).slice(0, limit),
+    matched,
+    unmatched,
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * Organisation
  * ------------------------------------------------------------------ */

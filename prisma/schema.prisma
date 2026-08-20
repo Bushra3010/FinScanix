@@ -67,6 +67,7 @@ model User {
 
   organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   sessions         Session[]
+  inviteTokens     InviteToken[]
   uploadedInvoices Invoice[]
   rateUploads      RateUpload[]
 
@@ -321,4 +322,21 @@ model ActivityEvent {
 
   @@index([organisationId, at])
   @@index([invoiceId])
+}
+
+/// One-time link that lets an invited member set their own password.
+///
+/// The token is never stored — only its SHA-256 — so a database leak cannot be
+/// used to claim an account, exactly as with sessions.
+model InviteToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

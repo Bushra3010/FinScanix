@@ -5,6 +5,7 @@ import { AccessDenied } from "@/components/app/access-denied";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { SERVICE_STATUS } from "@/lib/adapters";
+import { ProviderTestButton } from "@/components/app/provider-test";
 import { gateFor, requireUser } from "@/lib/auth/guard";
 
 export const metadata: Metadata = { title: "Integrations" };
@@ -76,6 +77,8 @@ export default async function IntegrationsPage() {
                       : "Not configured — this service is running on its mock implementation."}
                   </p>
                 </div>
+
+                <ProviderTestButton providerKey={service.key} />
               </CardContent>
             </Card>
           ))}

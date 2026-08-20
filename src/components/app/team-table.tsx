@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState, useTransition } from "react";
-import { Check, CircleAlert, LoaderCircle, UserPlus } from "lucide-react";
+import { Check, CircleAlert, Copy, LoaderCircle, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { useSession, useTier } from "@/components/app/session-context";
 import {
   changeRoleAction,
   inviteMemberAction,
+  reissueInviteAction,
   setMemberStatusAction,
   type OrgActionState,
 } from "@/lib/org/actions";
@@ -43,6 +44,8 @@ export function TeamTable({ users }: { users: User[] }) {
   );
   const [pending, startTransition] = useTransition();
   const [rowError, setRowError] = useState<string | null>(null);
+  const [link, setLink] = useState<{ url: string; note: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const activeSeats = users.filter((u) => u.status !== "suspended").length;
   const seatLimit = tier.seats;
@@ -53,6 +56,10 @@ export function TeamTable({ users }: { users: User[] }) {
     startTransition(async () => {
       const result = await action(data);
       if (result.error) setRowError(result.error);
+      if (result.inviteUrl) {
+        setLink({ url: result.inviteUrl, note: result.message ?? "" });
+        setCopied(false);
+      }
     });
   }
 
@@ -69,6 +76,30 @@ export function TeamTable({ users }: { users: User[] }) {
             </div>
             {pending && <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" />}
           </CardHeader>
+
+          {link && (
+            <div className="mx-5 mb-1 rounded-lg border border-brand/40 bg-brand-soft/40 px-3 py-2.5">
+              <p className="text-[12.5px] leading-relaxed text-foreground">{link.note}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded border border-border bg-surface px-2 py-1.5 font-mono text-[11.5px] text-foreground">
+                  {link.url}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(link.url).then(() => setCopied(true));
+                  }}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setLink(null)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          )}
 
           {rowError && (
             <div className="mx-5 mb-1 flex items-start gap-2 rounded-lg border border-over/40 bg-over-soft/50 px-3 py-2">
@@ -164,22 +195,39 @@ export function TeamTable({ users }: { users: User[] }) {
                       </TD>
                       <TD className="text-right">
                         {editable ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={pending}
-                            onClick={() => {
-                              const data = new FormData();
-                              data.set("userId", user.id);
-                              data.set(
-                                "status",
-                                user.status === "suspended" ? "active" : "suspended",
-                              );
-                              run(setMemberStatusAction, data);
-                            }}
-                          >
-                            {user.status === "suspended" ? "Reactivate" : "Suspend"}
-                          </Button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {user.status === "invited" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={pending}
+                                title="Issue a fresh link; any earlier one stops working"
+                                onClick={() => {
+                                  const data = new FormData();
+                                  data.set("userId", user.id);
+                                  run(reissueInviteAction, data);
+                                }}
+                              >
+                                Invite link
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={pending}
+                              onClick={() => {
+                                const data = new FormData();
+                                data.set("userId", user.id);
+                                data.set(
+                                  "status",
+                                  user.status === "suspended" ? "active" : "suspended",
+                                );
+                                run(setMemberStatusAction, data);
+                              }}
+                            >
+                              {user.status === "suspended" ? "Reactivate" : "Suspend"}
+                            </Button>
+                          </div>
                         ) : (
                           <span className="text-[12px] text-muted-foreground/50">—</span>
                         )}
@@ -233,9 +281,29 @@ export function TeamTable({ users }: { users: User[] }) {
                 </div>
               )}
               {invite.ok && invite.message && (
-                <div className="flex items-start gap-2 rounded-lg border border-par/40 bg-par-soft/50 px-3 py-2">
-                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-par" />
-                  <p className="text-[12.5px] leading-relaxed text-foreground">{invite.message}</p>
+                <div className="space-y-2 rounded-lg border border-par/40 bg-par-soft/50 px-3 py-2.5">
+                  <div className="flex items-start gap-2">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-par" />
+                    <p className="text-[12.5px] leading-relaxed text-foreground">
+                      {invite.message}
+                    </p>
+                  </div>
+                  {invite.inviteUrl && (
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate rounded border border-border bg-surface px-2 py-1.5 font-mono text-[11px] text-foreground">
+                        {invite.inviteUrl}
+                      </code>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigator.clipboard.writeText(invite.inviteUrl!)}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copy
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 

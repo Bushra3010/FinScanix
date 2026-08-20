@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db/client";
 import { hashPassword, validatePassword, verifyPassword } from "./password";
 import { createSession, destroySession, pruneExpiredSessions } from "./session";
+import { consumeInvite, resolveInvite } from "./invites";
 import { CITIES } from "@/lib/data/reference";
 
 export interface AuthState {
@@ -132,4 +133,40 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
 export async function logoutAction() {
   await destroySession();
   redirect("/login");
+}
+
+/**
+ * Accepts an invitation: sets the member's own password and signs them in.
+ *
+ * The token is checked again here rather than trusted from the page that
+ * rendered the form — a form can be posted to directly, and the page's check
+ * happened at render time.
+ */
+export async function acceptInviteAction(
+  _prev: AuthState,
+  formData: FormData,
+): Promise<AuthState> {
+  const token = String(formData.get("token") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+
+  const invite = await resolveInvite(token);
+  if (!invite) {
+    return { error: "This invitation has expired or has already been used. Ask for a new one." };
+  }
+
+  if (name.length < 2) return { error: "Enter your full name." };
+  if (password !== confirm) return { error: "The two passwords do not match." };
+
+  const problem = validatePassword(password);
+  if (problem) return { error: problem };
+
+  await consumeInvite(token, invite.userId, await hashPassword(password));
+  await prisma.user.update({ where: { id: invite.userId }, data: { name } });
+
+  const userAgent = (await headers()).get("user-agent") ?? undefined;
+  await createSession(invite.userId, userAgent);
+
+  redirect("/app/dashboard");
 }
