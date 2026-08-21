@@ -204,7 +204,8 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
               >
                 {cities.map((city) => (
                   <option key={city.id} value={city.id}>
-                    {city.name}, {city.state} — index {city.indexFactor.toFixed(2)}
+                    {city.name}, {city.state}
+                    {city.currency && city.region === "gcc" ? ` — ${city.currency}` : ""} — index {city.indexFactor.toFixed(2)}
                   </option>
                 ))}
               </Select>

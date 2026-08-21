@@ -23,7 +23,7 @@ import { requireUser } from "@/lib/auth/guard";
 import { deleteInvoiceAction } from "@/lib/invoices/actions";
 import { getInvoice, listCities } from "@/lib/db/queries";
 import type { AnalysedInvoice } from "@/lib/types";
-import { formatDate, formatINR } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Document" };
 
@@ -109,10 +109,17 @@ export default async function InvoiceDetailPage({
           />
           <Fact label="Pages" value={`${invoice.pageCount}`} />
           <Fact label="File size" value={`${(invoice.fileSizeKb / 1024).toFixed(2)} MB`} />
-          <Fact label="Tax rate" value={`${invoice.taxPct}% GST`} />
+          <Fact
+            label="Tax rate"
+            value={`${invoice.taxPct}% ${invoice.city.region === "gcc" ? "VAT" : "GST"}`}
+          />
           <Fact
             label="Gross total"
-            value={invoice.total > 0 ? formatINR(invoice.total, { decimals: 0 }) : "—"}
+            value={
+              invoice.total > 0
+                ? formatCurrency(invoice.total, invoice.city.currency ?? "INR", { decimals: 0 })
+                : "—"
+            }
           />
         </CardContent>
       </Card>

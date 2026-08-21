@@ -16,8 +16,22 @@ import type { AnalysedInvoice } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const money = (n: number) =>
-  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+const CURRENCY_LOCALES: Record<string, string> = {
+  INR: "en-IN",
+  SAR: "ar-SA",
+  AED: "en-AE",
+  KWD: "en-KW",
+  BHD: "en-BH",
+  OMR: "en-OM",
+};
+
+function money(n: number, currency = "INR") {
+  const locale = CURRENCY_LOCALES[currency] ?? "en-IN";
+  return new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(n);
+}
 
 export async function GET(
   request: NextRequest,
@@ -72,6 +86,8 @@ export async function GET(
 /* ------------------------------------------------------------------ */
 
 async function buildWorkbook(invoice: AnalysedInvoice, orgName: string) {
+  const currency = invoice.city.currency ?? "INR";
+  const taxLabel = invoice.city.region === "gcc" ? "VAT" : "GST";
   const wb = new ExcelJS.Workbook();
   wb.creator = "FinScanix";
   wb.created = new Date();
@@ -85,12 +101,15 @@ async function buildWorkbook(invoice: AnalysedInvoice, orgName: string) {
     ["Vendor", invoice.vendor],
     ["Project", invoice.project],
     ["City", `${invoice.city.name} (index ${invoice.city.indexFactor.toFixed(2)})`],
+    ["Currency", currency],
+    ["Tax type", taxLabel],
+    ["Tax rate", `${invoice.taxPct}%`],
     ["Uploaded", new Date(invoice.uploadedAt).toLocaleString("en-IN")],
     ["", ""],
-    ["Net billed value", invoice.subtotal],
-    ["Benchmark value", invoice.summary.benchmarkTotal],
+    ["Net billed value", `${currency} ${money(invoice.subtotal, currency)}`],
+    ["Benchmark value", `${currency} ${money(invoice.summary.benchmarkTotal, currency)}`],
     ["Variance", `${invoice.summary.variancePct.toFixed(2)}%`],
-    ["Recoverable", invoice.summary.potentialSaving],
+    ["Recoverable", `${currency} ${money(invoice.summary.potentialSaving, currency)}`],
     ["", ""],
     ["Over-priced lines", invoice.summary.overCount],
     ["At par lines", invoice.summary.parCount],
@@ -122,7 +141,7 @@ async function buildWorkbook(invoice: AnalysedInvoice, orgName: string) {
     { header: "Market median", key: "median", width: 14 },
     { header: "Benchmark", key: "bench", width: 14 },
     { header: "Variance %", key: "pct", width: 12 },
-    { header: "Variance ₹", key: "var", width: 14 },
+    { header: `Variance ${currency}`, key: "var", width: 14 },
     { header: "Verdict", key: "flag", width: 14 },
     { header: "Corrected", key: "corrected", width: 11 },
   ];
@@ -189,10 +208,12 @@ async function buildWorkbook(invoice: AnalysedInvoice, orgName: string) {
 /* ------------------------------------------------------------------ */
 
 function buildPdf(invoice: AnalysedInvoice, orgName: string): Promise<Buffer> {
+  const currency = invoice.city.currency ?? "INR";
+  const taxLabel = invoice.city.region === "gcc" ? "VAT" : "GST";
+
   return new Promise((resolve, reject) => {
-    // The built-in Helvetica avoids shipping font files; the rupee glyph is not
-    // in its encoding, so amounts are labelled INR rather than rendering as a
-    // wrong character.
+    // The built-in Helvetica avoids shipping font files; currency symbols that
+    // fall outside its encoding are replaced by the ISO code (e.g. "INR", "AED").
     const doc = new PDFDocument({ size: "A4", margin: 40, font: "Helvetica" });
     const chunks: Buffer[] = [];
 
@@ -210,16 +231,16 @@ function buildPdf(invoice: AnalysedInvoice, orgName: string): Promise<Buffer> {
     doc.font("Helvetica").fontSize(9.5).fillColor("#333");
     doc.text(`Vendor: ${invoice.vendor}`);
     doc.text(`Project: ${invoice.project}`);
-    doc.text(`City: ${invoice.city.name} (cost index ${invoice.city.indexFactor.toFixed(2)})`);
+    doc.text(`City: ${invoice.city.name} (cost index ${invoice.city.indexFactor.toFixed(2)})  ·  ${currency}  ·  ${taxLabel} ${invoice.taxPct}%`);
     doc.text(`Uploaded: ${new Date(invoice.uploadedAt).toLocaleString("en-IN")}`);
     doc.moveDown(0.8);
 
     doc.fillColor("#000").fontSize(10).font("Helvetica-Bold").text("Summary");
     doc.font("Helvetica").fontSize(9.5).fillColor("#333");
-    doc.text(`Net billed value: INR ${money(invoice.subtotal)}`);
-    doc.text(`Benchmark value: INR ${money(invoice.summary.benchmarkTotal)}`);
+    doc.text(`Net billed value: ${currency} ${money(invoice.subtotal, currency)}`);
+    doc.text(`Benchmark value: ${currency} ${money(invoice.summary.benchmarkTotal, currency)}`);
     doc.text(`Variance: ${invoice.summary.variancePct.toFixed(2)}%`);
-    doc.text(`Recoverable: INR ${money(invoice.summary.potentialSaving)}`);
+    doc.text(`Recoverable: ${currency} ${money(invoice.summary.potentialSaving, currency)}`);
     doc.text(
       `Verdicts: ${invoice.summary.overCount} over-priced, ${invoice.summary.parCount} at par, ` +
         `${invoice.summary.underCount} under-priced, ${invoice.summary.unmatchedCount} unmatched`,

@@ -6,7 +6,7 @@ import { CircleAlert, Info, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FieldHint, Input, Label, Select } from "@/components/ui/field";
 import { loginAction, registerAction, type AuthState } from "@/lib/auth/actions";
-import { CITIES } from "@/lib/data/reference";
+import { ALL_CITIES } from "@/lib/data/cities";
 import { TIERS } from "@/lib/data/org";
 import type { TierId } from "@/lib/types";
 
@@ -127,9 +127,10 @@ export function AuthForm({
             <div>
               <Label htmlFor="city">Primary project city</Label>
               <Select id="city" name="city" defaultValue="noida">
-                {CITIES.map((city) => (
+                {ALL_CITIES.map((city) => (
                   <option key={city.id} value={city.id}>
-                    {city.name}, {city.state} · index {city.indexFactor.toFixed(2)}
+                    {city.name}, {city.state}
+                    {city.currency && city.region === "gcc" ? ` · ${city.currency}` : ""} · index {city.indexFactor.toFixed(2)}
                   </option>
                 ))}
               </Select>
