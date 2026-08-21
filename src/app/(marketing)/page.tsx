@@ -161,9 +161,13 @@ export default function LandingPage() {
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link
                   href="/register"
-                  className={buttonStyles({ size: "lg", className: "h-12 rounded-xl px-6" })}
+                  className={buttonStyles({
+                    size: "lg",
+                    className:
+                      "h-12 rounded-full px-7 bg-gradient-to-r from-teal-500 to-cyan-400 hover:from-teal-400 hover:to-cyan-300 border-0 text-white shadow-lg",
+                  })}
                 >
-                  Start free trial
+                  Upload Your First Quotation
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
@@ -505,8 +509,15 @@ export default function LandingPage() {
                 required for the trial.
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
-                <Link href="/register" className={buttonStyles({ size: "lg" })}>
-                  Start free trial
+                <Link
+                  href="/register"
+                  className={buttonStyles({
+                    size: "lg",
+                    className:
+                      "rounded-full px-7 bg-gradient-to-r from-teal-500 to-cyan-400 hover:from-teal-400 hover:to-cyan-300 border-0 text-white shadow-lg",
+                  })}
+                >
+                  Upload Your First Quotation
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link href="/pricing" className={buttonStyles({ variant: "outline", size: "lg" })}>

@@ -44,10 +44,11 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               href="/register"
               className={buttonStyles({
                 size: "lg",
-                className: "hidden h-11 rounded-xl px-5 sm:inline-flex",
+                className:
+                  "hidden h-11 rounded-full px-5 sm:inline-flex bg-gradient-to-r from-teal-500 to-cyan-400 hover:from-teal-400 hover:to-cyan-300 border-0 text-white shadow-md",
               })}
             >
-              Start free trial
+              Upload Your First Quotation
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
