@@ -157,9 +157,9 @@ export const mockPricingSearch: PricingSearchAdapter = {
 
   async search({ description, unit, cityId, limit = 3 }): Promise<MarketQuote[]> {
     const city = getCity(cityId);
+    const isGcc = city?.region === "gcc";
     const words = description.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
 
-    // Cheap term-overlap match — the production adapter queries the search API.
     let best = SOR_CATALOG[0];
     let bestScore = 0;
     for (const entry of SOR_CATALOG) {
@@ -171,16 +171,24 @@ export const mockPricingSearch: PricingSearchAdapter = {
       }
     }
 
-    const centre = best.baseRate * city.indexFactor * 1.02;
-    return buildQuotes(
+    const spreadMultiplier = isGcc ? 0.25 : 0.19;
+    const centre = best.baseRate * (city?.indexFactor ?? 1) * (isGcc ? 1.05 : 1.02);
+    const quotes = buildQuotes(
       `search-${cityId}-${description.slice(0, 24)}`,
       description,
       unit || best.unit,
       centre,
       limit,
-      city.name,
+      city?.name ?? "",
       new Date().toISOString(),
+      spreadMultiplier,
     );
+
+    return quotes.map((q) => ({
+      ...q,
+      currency: city?.currency ?? "INR",
+      vatPct: city?.vatPct ?? null,
+    }));
   },
 };
 

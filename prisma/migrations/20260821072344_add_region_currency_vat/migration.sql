@@ -1,0 +1,9 @@
+-- AlterTable
+ALTER TABLE "City" ADD COLUMN     "country" TEXT NOT NULL DEFAULT 'IN',
+ADD COLUMN     "currency" TEXT NOT NULL DEFAULT 'INR',
+ADD COLUMN     "region" TEXT NOT NULL DEFAULT 'india',
+ADD COLUMN     "vatPct" DOUBLE PRECISION;
+
+-- AlterTable
+ALTER TABLE "MarketQuote" ADD COLUMN     "currency" TEXT NOT NULL DEFAULT 'INR',
+ADD COLUMN     "vatPct" DOUBLE PRECISION;

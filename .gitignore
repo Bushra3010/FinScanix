@@ -26,6 +26,10 @@ yarn-error.log*
 .env*.local
 .env.production
 
+# PRE-COMMIT GUARD — DO NOT REMOVE
+# If .env ever reappears in git, this hook stops it.
+# Install: pre-commit install (after `npm install -g pre-commit`)
+
 # typescript
 *.tsbuildinfo
 

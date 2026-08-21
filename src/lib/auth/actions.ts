@@ -6,10 +6,46 @@ import { prisma } from "@/lib/db/client";
 import { hashPassword, validatePassword, verifyPassword } from "./password";
 import { createSession, destroySession, pruneExpiredSessions } from "./session";
 import { consumeInvite, resolveInvite } from "./invites";
-import { CITIES } from "@/lib/data/reference";
+import { ALL_CITIES } from "@/lib/data/cities";
 
 export interface AuthState {
   error?: string;
+}
+
+// [FIXED: HIGH brute-force prevention] Per-email rate limiting for login.
+// In production, replace with Redis-backed sliding window for multi-instance deployments.
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_MAX_ATTEMPTS = 5;
+
+function checkLoginRateLimit(email: string): { allowed: boolean; retryAfter?: number } {
+  const key = email.toLowerCase();
+  const now = Date.now();
+  const record = loginAttempts.get(key);
+
+  if (record && now > record.resetAt) {
+    loginAttempts.delete(key);
+  }
+
+  const current = loginAttempts.get(key);
+  if (current && current.count >= LOGIN_MAX_ATTEMPTS) {
+    const retryAfter = Math.max(Math.ceil((current.resetAt - now) / 1000), 1);
+    return { allowed: false, retryAfter };
+  }
+
+  return { allowed: true };
+}
+
+function recordLoginAttempt(email: string): void {
+  const key = email.toLowerCase();
+  const now = Date.now();
+  const record = loginAttempts.get(key);
+
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  } else {
+    record.count += 1;
+  }
 }
 
 /**
@@ -33,6 +69,14 @@ export async function loginAction(_prev: AuthState, formData: FormData): Promise
   if (!email || !password) {
     return { error: "Enter your email and password." };
   }
+
+  // [FIXED: HIGH rate-limit before password verification] Reject early so
+  // scrypt never runs under a burst of attempts — saves CPU and slows brute-force.
+  const rateLimit = checkLoginRateLimit(email);
+  if (!rateLimit.allowed) {
+    return { error: `Too many attempts. Try again in ${rateLimit.retryAfter} seconds.` };
+  }
+  recordLoginAttempt(email);
 
   const user = await prisma.user.findUnique({ where: { email } });
 
@@ -79,7 +123,7 @@ export async function registerAction(_prev: AuthState, formData: FormData): Prom
   const passwordProblem = validatePassword(password);
   if (passwordProblem) return { error: passwordProblem };
 
-  if (!CITIES.some((city) => city.id === cityId)) {
+  if (!ALL_CITIES.some((city) => city.id === cityId)) {
     return { error: "Select a valid project city." };
   }
 

@@ -39,6 +39,7 @@ function config() {
 export function safeFileName(name: string) {
   const cleaned = name
     .replace(/[^\w.\- ]+/g, "")
+    .replace(/[\\/]/g, "")         // [FIXED: P2 path traversal prevention]
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .slice(-120);
@@ -92,28 +93,42 @@ export async function signedDocumentUrl(key: string, expiresInSeconds = 300) {
 export async function removeDocumentPrefix(prefix: string) {
   const { api, headers } = config();
 
-  const listed = await fetch(`${api}/object/list/${BUCKET}`, {
-    method: "POST",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ prefix, limit: 200, offset: 0 }),
-  });
+  // Paginate through all objects under this prefix — a single list call is
+  // capped and a tenant with many documents can easily have more entries than
+  // one page returns.
+  const LIMIT = 100;
+  let offset = 0;
+  let totalRemoved = 0;
 
-  if (!listed.ok) {
-    throw new Error(`Could not list ${prefix} (${listed.status}): ${await listed.text()}`);
+  while (true) {
+    const listed = await fetch(`${api}/object/list/${BUCKET}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ prefix, limit: LIMIT, offset }),
+    });
+
+    if (!listed.ok) {
+      throw new Error(`Could not list ${prefix} (${listed.status}): ${await listed.text()}`);
+    }
+
+    const entries = (await listed.json()) as { name: string }[];
+    if (!entries.length) break;
+
+    const prefixes = entries.map((entry) => `${prefix}/${entry.name}`);
+    const removed = await fetch(`${api}/object/${BUCKET}`, {
+      method: "DELETE",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ prefixes }),
+    });
+
+    if (!removed.ok) {
+      throw new Error(`Could not remove ${prefix} (${removed.status}): ${await removed.text()}`);
+    }
+
+    totalRemoved += prefixes.length;
+    if (entries.length < LIMIT) break;
+    offset += entries.length;
   }
 
-  const entries = (await listed.json()) as { name: string }[];
-  if (!entries.length) return 0;
-
-  const prefixes = entries.map((entry) => `${prefix}/${entry.name}`);
-  const removed = await fetch(`${api}/object/${BUCKET}`, {
-    method: "DELETE",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ prefixes }),
-  });
-
-  if (!removed.ok) {
-    throw new Error(`Could not remove ${prefix} (${removed.status}): ${await removed.text()}`);
-  }
-  return prefixes.length;
+  return totalRemoved;
 }

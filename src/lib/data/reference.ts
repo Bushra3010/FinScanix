@@ -1,8 +1,13 @@
 import type { City, SorEntry } from "../types";
+import { GCC_CITIES, getGccCity } from "./reference-gcc";
 
 /**
  * City cost-index factors (CPWD-style, Delhi = 1.00) used to localise SoR base
  * rates — FR-3.3. In production these are admin-maintained rows in the DB.
+ *
+ * GCC cities live in reference-gcc.ts and are included in ALL_CITIES for
+ * validation and lookup. getCity() below searches both arrays so the pipeline
+ * and pricing adapters resolve either region transparently.
  */
 export const CITIES: City[] = [
   { id: "delhi", name: "New Delhi", state: "Delhi", pin: "110001", indexFactor: 1.0 },
@@ -23,7 +28,7 @@ export const CITIES: City[] = [
 ];
 
 export function getCity(id: string): City {
-  return CITIES.find((c) => c.id === id) ?? CITIES[0];
+  return CITIES.find((c) => c.id === id) ?? GCC_CITIES.find((c) => c.id === id) ?? CITIES[0];
 }
 
 /**
@@ -279,7 +284,7 @@ const SOR_SEED: Omit<SorEntry, "owned">[] = [
     id: "sor-023",
     code: "DSR(E&M) 3.6.1",
     description:
-      "Supplying and fixing 6A/16A modular switch socket outlet with modular plate, suitable G.I. box and earth connection",
+      "Supplying and fixing 6A/16A modular switch socket outlet of modular plate, suitable G.I. box and earth terminal",
     unit: "each",
     baseRate: 640,
     source: "CPWD DSR (E&M) 2023",

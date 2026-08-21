@@ -87,6 +87,7 @@ export function buildQuotes(
   count: number,
   cityName: string,
   fetchedAt: string,
+  spreadMultiplier = 0.19,
 ): MarketQuote[] {
   const rng = mulberry32(hashString(itemId));
   const quotes: MarketQuote[] = [];
@@ -100,7 +101,7 @@ export function buildQuotes(
     used.add(pick);
     const source = SELLERS[pick];
     const seller = source.sellers[Math.floor(rng() * source.sellers.length)];
-    const spread = (rng() - 0.45) * 0.19; // roughly ±9%
+    const spread = (rng() - 0.45) * spreadMultiplier; // roughly ±9.5% default
     const price = centre * (1 + spread);
     const ageMinutes = Math.floor(rng() * 220) + 20;
 
@@ -114,6 +115,8 @@ export function buildQuotes(
       url: source.searchUrl + encodeURIComponent(searchTerms(description)),
       fetchedAt: new Date(new Date(fetchedAt).getTime() - ageMinutes * 60000).toISOString(),
       inStock: rng() > 0.15,
+      currency: "INR",
+      vatPct: null,
     });
   }
   return quotes;

@@ -50,13 +50,20 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * Mappers
  * ------------------------------------------------------------------ */
 
-function toCity(row: { id: string; name: string; state: string; pin: string; indexFactor: number }): City {
+function toCity(row: {
+  id: string; name: string; state: string; pin: string; indexFactor: number;
+  country?: string; currency?: string; vatPct?: number | null; region?: string;
+}): City {
   return {
     id: row.id,
     name: row.name,
     state: row.state,
     pin: row.pin,
     indexFactor: row.indexFactor,
+    country: row.country ?? "IN",
+    currency: row.currency ?? "INR",
+    vatPct: row.vatPct ?? null,
+    region: row.region ?? "india",
   };
 }
 
@@ -96,6 +103,8 @@ function toLineItem(row: InvoiceRow["lineItems"][number]): LineItem {
         seller: quote.seller,
         platform: quote.platform as MarketQuote["platform"],
         price: quote.price,
+        currency: quote.currency,
+        vatPct: quote.vatPct,
         unit: quote.unit,
         location: quote.location,
         url: quote.url,

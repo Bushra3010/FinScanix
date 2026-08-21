@@ -7,10 +7,10 @@ import { detectLocation } from "@/lib/extraction/locate";
 import { matchSor } from "@/lib/matching/sor";
 import { listSorEntries } from "@/lib/db/queries";
 import { documentKey, putDocument, storageConfigured } from "@/lib/storage";
-import { CITIES } from "@/lib/data/reference";
+import { ALL_CITIES, getCityAny } from "@/lib/data/cities";
 import type { QualityCheck } from "@/lib/types";
 
-const getCityName = (id: string) => CITIES.find((city) => city.id === id)?.name ?? id;
+const getCityName = (id: string) => ALL_CITIES.find((city) => city.id === id)?.name ?? id;
 
 /**
  * The ingestion pipeline: one uploaded file to a stored, extracted, matched and
@@ -256,6 +256,8 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     );
   }
 
+  const cityMeta = getCityAny(cityId);
+
   checks.push({
     id: "location",
     label: "Location",
@@ -283,7 +285,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       fileName: input.fileName,
       fileSizeKb: Math.round(input.bytes.byteLength / 1024),
       pageCount: extracted?.pageCount ?? 1,
-      taxPct: extracted?.taxPct ?? 18,
+      taxPct: extracted?.taxPct ?? cityMeta?.vatPct ?? 18,
       qualityPassed: true,
       qualityScore: score,
       extractionNote: [extracted?.note, ...locationNotes].filter(Boolean).join(" ") || null,
@@ -304,13 +306,8 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     const key = documentKey(input.organisationId, invoice.id, input.fileName);
     try {
       await putDocument(key, original, input.mimeType);
-      // storageKey is what the download route keys off, so it is set only on a
-      // confirmed upload. A failed store leaves it null and the interface says
-      // the original is unavailable rather than offering a link that 404s.
       await prisma.invoice.update({ where: { id: invoice.id }, data: { storageKey: key } });
     } catch (error) {
-      // Storage is not worth losing the extraction over — the report stands on
-      // its own — but the failure is recorded, not swallowed.
       console.error("Document storage failed", error);
       await prisma.activityEvent.create({
         data: {
@@ -386,6 +383,8 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
             seller: quote.seller,
             platform: quote.platform,
             price: quote.price,
+            currency: quote.currency,
+            vatPct: quote.vatPct,
             unit: quote.unit,
             location: quote.location,
             url: quote.url,

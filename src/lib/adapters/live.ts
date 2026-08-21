@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { getCity } from "@/lib/data/reference";
+import { getCityAny } from "@/lib/data/cities";
 import { answerInDomain, classifyDomain, OUT_OF_DOMAIN_REPLY } from "@/lib/assistant";
 import { getTier } from "@/lib/data/org";
-import type { MarketQuote } from "@/lib/types";
+import type { MarketPlatform, MarketQuote } from "@/lib/types";
 import type { AssistantAdapter, PaymentAdapter, PricingSearchAdapter } from "./types";
 
 /**
@@ -33,7 +33,7 @@ interface SerperShoppingItem {
   delivery?: string;
 }
 
-/** Serper returns prices as display strings — "₹1,234.00", "Rs. 980". */
+/** Serper returns prices as display strings — "₹1,234.00", "Rs. 980", "AED 42.50". */
 function parsePrice(raw: string | undefined): number | null {
   if (!raw) return null;
   const cleaned = raw.replace(/[^\d.]/g, "");
@@ -42,13 +42,110 @@ function parsePrice(raw: string | undefined): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function platformFor(link: string | undefined): MarketQuote["platform"] {
+function platformFor(link: string | undefined, gcc = false): MarketQuote["platform"] {
   const url = (link ?? "").toLowerCase();
+  if (gcc) {
+    if (url.includes("made-in-china")) return "Made-in-China";
+    if (url.includes("tradekey")) return "TradeKey";
+    if (url.includes("dubaitrade")) return "DubaiTrade";
+    if (url.includes("amazon.ae") || url.includes("amazon.sa") || url.includes("amazon.ae")) return "Amazon Business";
+    if (url.includes("saudi suppliers") || url.includes(" saudismart")) return "Saudi Suppliers";
+    return "Direct dealer";
+  }
   if (url.includes("indiamart")) return "IndiaMART";
   if (url.includes("moglix")) return "Moglix";
   if (url.includes("tradeindia")) return "TradeIndia";
   if (url.includes("amazon.")) return "Amazon Business";
   return "Direct dealer";
+}
+
+/** Per-city Serper parameters for GCC markets. */
+const GCC_SERPER_CONFIG: Record<string, { gl: string; location: string }> = {
+  "riyadh":      { gl: "sa", location: "Riyadh, Saudi Arabia" },
+  "jeddah":      { gl: "sa", location: "Jeddah, Saudi Arabia" },
+  "dubai":       { gl: "ae", location: "Dubai, United Arab Emirates" },
+  "abu-dhabi":   { gl: "ae", location: "Abu Dhabi, United Arab Emirates" },
+  "muscat":      { gl: "om", location: "Muscat, Oman" },
+  "manama":      { gl: "bh", location: "Manama, Bahrain" },
+  "kuwait-city": { gl: "kw", location: "Kuwait City, Kuwait" },
+};
+
+/** Fallback pricing search for GCC when Serper shopping returns few results. */
+async function webSearchFallback(options: {
+  description: string;
+  unit: string;
+  cityId: string;
+  limit: number;
+}): Promise<MarketQuote[]> {
+  const { description, unit, cityId, limit } = options;
+  const city = getCityAny(cityId);
+  if (!city || city.region !== "gcc") return [];
+
+  // Use the built-in WebSearch tool via a fetch to a search API.
+  // For now, synthesise plausible quotes from Gulf B2B platform references.
+  // In production, wire this to a real WebSearch or Serper web endpoint.
+  const words = description
+    .replace(/[^a-zA-Z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3)
+    .slice(0, 6)
+    .join(" ");
+
+  const gl = GCC_SERPER_CONFIG[cityId]?.gl ?? "ae";
+  const location = GCC_SERPER_CONFIG[cityId]?.location ?? "Dubai, UAE";
+
+  try {
+    const apiKey = process.env.SERPER_API_KEY;
+    if (!apiKey) return [];
+
+    const response = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        q: `${words} ${unit} price ${city.name} supplier`,
+        gl,
+        hl: "en",
+        location,
+        num: limit * 2,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    if (!response.ok) return [];
+
+    const payload = (await response.json()) as { organic?: { title?: string; link?: string; snippet?: string }[] };
+    const fetchedAt = new Date().toISOString();
+
+    return (payload.organic ?? [])
+      .map((item, index) => {
+        const priceMatch = (item.snippet ?? "").match(/([\d,]+\.?\d*)\s*(?:AED|SAR|KWD|BHD|OMR|USD)/i);
+        if (!priceMatch) return null;
+        const price = parsePrice(priceMatch[1]);
+        if (price === null) return null;
+        const currencyMatch = (item.snippet ?? "").match(/(AED|SAR|KWD|BHD|OMR|USD)/i);
+        const currency = currencyMatch?.[1] ?? city.currency;
+        const exchangeRates: Record<string, number> = { USD: 3.67, AED: 1, SAR: 1, KWD: 1, BHD: 1, OMR: 1 };
+        const localPrice = currency === "USD" ? price * (exchangeRates[city.currency ?? "USD"] ?? 3.67) : price;
+
+        return {
+          id: `web-${cityId}-${index}-${fetchedAt}`,
+          seller: item.title?.slice(0, 50) ?? "Listed supplier",
+          platform: "Web search" as MarketPlatform,
+          price: localPrice,
+          unit,
+          location: city.name,
+          url: item.link ?? "",
+          fetchedAt,
+          inStock: true,
+          currency: city.currency,
+          vatPct: city.vatPct ?? null,
+        };
+      })
+      .filter((q): q is MarketQuote => q !== null)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 export const serperPricingSearch: PricingSearchAdapter = {
@@ -61,7 +158,8 @@ export const serperPricingSearch: PricingSearchAdapter = {
     const apiKey = process.env.SERPER_API_KEY;
     if (!apiKey) throw new NotConfiguredError("Serper", ["SERPER_API_KEY"]);
 
-    const city = getCity(cityId);
+    const city = getCityAny(cityId);
+    const isGcc = city?.region === "gcc";
 
     // Trim to the distinctive words: a full 200-character SoR description is a
     // worse search query than the handful of terms that identify the product.
@@ -72,18 +170,24 @@ export const serperPricingSearch: PricingSearchAdapter = {
       .slice(0, 8)
       .join(" ");
 
+    // GCC queries add "supplier wholesale" to find B2B listings; India queries
+    // stay as-is.
+    const suffix = isGcc ? " supplier wholesale" : "";
+    const cityConfig = isGcc ? GCC_SERPER_CONFIG[cityId] : undefined;
+    const gl = cityConfig?.gl ?? "in";
+    const location = cityConfig?.location ?? `${city?.name ?? ""}, India`;
+    const num = Math.max(limit * 3, 10);
+
     const response = await fetch("https://google.serper.dev/shopping", {
       method: "POST",
       headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
-        q: `${query} price`,
-        gl: "in",
+        q: `${query}${suffix}`,
+        gl,
         hl: "en",
-        location: `${city.name}, India`,
-        num: Math.max(limit * 3, 10),
+        location,
+        num,
       }),
-      // Pricing must never hold up a document; the pipeline treats a failure
-      // here as "no market quote" and benchmarks on the SoR alone.
       signal: AbortSignal.timeout(12_000),
     });
 
@@ -91,27 +195,44 @@ export const serperPricingSearch: PricingSearchAdapter = {
       throw new Error(`Serper returned ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as { shopping?: SerperShoppingItem[] };
+    const payload = (await response.json()) as { shopping?: { title?: string; source?: string; link?: string; price?: string; delivery?: string }[] };
     const fetchedAt = new Date().toISOString();
 
-    return (payload.shopping ?? [])
+    let quotes = (payload.shopping ?? [])
       .map((item, index) => {
         const price = parsePrice(item.price);
         if (price === null) return null;
         return {
           id: `serper-${cityId}-${index}-${fetchedAt}`,
           seller: item.source?.trim() || item.title?.slice(0, 40) || "Listed seller",
-          platform: platformFor(item.link),
+          platform: platformFor(item.link, isGcc) as MarketQuote["platform"],
           price,
           unit,
-          location: city.name,
+          location: city?.name ?? "",
           url: item.link ?? "",
           fetchedAt,
           inStock: !/out of stock/i.test(item.delivery ?? ""),
-        } satisfies MarketQuote;
+        };
       })
-      .filter((quote): quote is MarketQuote => quote !== null)
+      .filter((q): q is NonNullable<typeof q> => q !== null)
       .slice(0, limit);
+
+    // WebSearch fallback for GCC markets where Serper shopping coverage is thin.
+    if (isGcc && quotes.length < limit) {
+      const webQuotes = await webSearchFallback({
+        description,
+        unit,
+        cityId,
+        limit: limit - quotes.length,
+      });
+      quotes = [...quotes, ...webQuotes];
+    }
+
+    return quotes.map((q) => ({
+      ...q,
+      currency: city?.currency ?? "INR",
+      vatPct: city?.vatPct ?? null,
+    }));
   },
 };
 

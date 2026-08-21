@@ -63,8 +63,10 @@ export function parseCron(expression: string): CronFields {
 /**
  * Schedules are expressed in IST, because that is the working day of every
  * user of this product. Computing in UTC would silently shift a 03:00 job.
+ *
+ * India does not observe daylight-saving time, so the offset is constant.
  */
-const IST_OFFSET_MINUTES = 330;
+const IST_OFFSET_MINUTES = 5 * 60 + 30; // +05:30 — no DST
 
 function toIst(date: Date) {
   return new Date(date.getTime() + IST_OFFSET_MINUTES * 60_000);

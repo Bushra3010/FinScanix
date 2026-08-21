@@ -69,6 +69,13 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
+  // Check validity and expire atomically so a stolen-but-expired cookie
+  // cannot be used by a concurrent request between the check and the cleanup.
+  const deleted = await prisma.session.deleteMany({
+    where: { tokenHash: hashToken(token), expiresAt: { lte: new Date() } },
+  });
+  if (deleted.count > 0) return null;
+
   const session = await prisma.session.findUnique({
     where: { tokenHash: hashToken(token) },
     include: {
@@ -81,11 +88,6 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   });
 
   if (!session) return null;
-
-  if (session.expiresAt.getTime() <= Date.now()) {
-    await prisma.session.deleteMany({ where: { id: session.id } });
-    return null;
-  }
 
   const { user } = session;
   // A suspended account keeps its rows but loses access immediately.

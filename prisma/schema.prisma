@@ -115,6 +115,10 @@ model City {
   state       String
   pin         String
   indexFactor Float
+  country     String  @default("IN")
+  currency    String  @default("INR")
+  vatPct      Float?
+  region      String  @default("india")
 
   organisations Organisation[]
   invoices      Invoice[]
@@ -247,13 +251,15 @@ model LineItem {
   @@index([sorEntryId])
 }
 
-/// platform: IndiaMART | Moglix | TradeIndia | Amazon Business | Direct dealer
+/// platform: IndiaMART | Moglix | TradeIndia | Amazon Business | Direct dealer | Made-in-China | TradeKey | DubaiTrade | Saudi Suppliers | Web search
 model MarketQuote {
   id         String   @id @default(cuid())
   lineItemId String
   seller     String
   platform   String
   price      Float
+  currency   String   @default("INR")
+  vatPct     Float?
   unit       String
   location   String
   url        String

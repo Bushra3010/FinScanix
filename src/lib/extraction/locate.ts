@@ -1,4 +1,4 @@
-import { CITIES } from "@/lib/data/reference";
+import { ALL_CITIES } from "@/lib/data/cities";
 
 /**
  * Works out which city's cost index a document should be priced against —
@@ -27,8 +27,13 @@ export interface LocationGuess {
 /**
  * First three digits of a PIN identify the sorting district, which is what
  * makes this reliable: 400 is Mumbai whatever the last three digits say.
+ *
+ * GCC postal codes (5 digits starting with 1–9) are intentionally excluded
+ * because the prefix map below only covers India's 6-digit PIN system.
  */
-const PIN_PREFIX = new Map(CITIES.map((city) => [city.pin.slice(0, 3), city.id]));
+const PIN_PREFIX = new Map(
+  ALL_CITIES.filter((city) => city.pin && /^\d{6}$/.test(city.pin)).map((city) => [city.pin.slice(0, 3), city.id]),
+);
 
 const PIN_RE = /\b([1-9]\d{5})\b/g;
 
@@ -45,7 +50,7 @@ export function detectLocation(text: string): LocationGuess | null {
   // Otherwise the city name, matched on a word boundary so "Puner" or a
   // description containing "Kochi" as part of a longer word does not count.
   const haystack = text.toLowerCase();
-  for (const city of CITIES) {
+  for (const city of ALL_CITIES) {
     const name = city.name.toLowerCase();
     const pattern = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`);
     if (pattern.test(haystack)) {

@@ -104,7 +104,8 @@ function readDimensions(bytes: Uint8Array, mimeType: string): { width: number; h
           width: view.getUint16(offset + 7),
         };
       }
-      offset += 2 + view.getUint16(offset + 2);
+      const segLen = view.getUint16(offset + 2);
+      offset += 2 + segLen;
     }
   }
 

@@ -29,6 +29,14 @@ export interface City {
   pin: string;
   /** CPWD-style cost index, Delhi = 1.00 baseline. */
   indexFactor: number;
+  /** ISO 3166-1 alpha-2 country code. */
+  country?: string;
+  /** ISO 4217 currency code. */
+  currency?: string;
+  /** VAT rate as a percentage, or null where not applicable (e.g. India uses GST). */
+  vatPct?: number | null;
+  /** "india" | "gcc" — drives pricing adapter routing and display. */
+  region?: string;
 }
 
 /** A Schedule of Rates entry seeded from CPWD / State PWD books — FR-3.1. */
@@ -49,12 +57,28 @@ export interface SorEntry {
   owned: boolean;
 }
 
+export type MarketPlatform =
+  | "IndiaMART"
+  | "Moglix"
+  | "TradeIndia"
+  | "Amazon Business"
+  | "Direct dealer"
+  | "Made-in-China"
+  | "TradeKey"
+  | "DubaiTrade"
+  | "Saudi Suppliers"
+  | "Web search";
+
 /** A live market price fetched from a B2B/e-commerce source — FR-4.1. */
 export interface MarketQuote {
   id: string;
   seller: string;
-  platform: "IndiaMART" | "Moglix" | "TradeIndia" | "Amazon Business" | "Direct dealer";
+  platform: MarketPlatform;
   price: number;
+  /** ISO 4217 currency code the price is denominated in. */
+  currency: string;
+  /** VAT rate included in the quoted price, or null if unknown / not applicable. */
+  vatPct: number | null;
   unit: string;
   location: string;
   url: string;

@@ -5,20 +5,48 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
-/** Indian Rupee formatting — the product's only currency in v1. */
-export function formatINR(value: number, opts?: { compact?: boolean; decimals?: number }) {
-  if (opts?.compact) {
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  INR: "₹",
+  SAR: "﷼",
+  AED: "د.إ",
+  KWD: "د.ك",
+  BHD: "د.ب",
+  OMR: "ر.ع.",
+};
+
+const CURRENCY_LOCALES: Record<string, string> = {
+  INR: "en-IN",
+  SAR: "ar-SA",
+  AED: "en-AE",
+  KWD: "en-KW",
+  BHD: "en-BH",
+  OMR: "en-OM",
+};
+
+/** Format a numeric value in the given currency. */
+export function formatCurrency(
+  value: number,
+  currency: string = "INR",
+  opts?: { compact?: boolean; decimals?: number },
+): string {
+  if (opts?.compact && currency === "INR") {
     const abs = Math.abs(value);
     if (abs >= 1_00_00_000) return `₹${(value / 1_00_00_000).toFixed(2)} Cr`;
     if (abs >= 1_00_000) return `₹${(value / 1_00_000).toFixed(2)} L`;
     if (abs >= 1_000) return `₹${(value / 1_000).toFixed(1)}K`;
   }
-  return new Intl.NumberFormat("en-IN", {
+
+  return new Intl.NumberFormat(CURRENCY_LOCALES[currency] ?? "en-US", {
     style: "currency",
-    currency: "INR",
+    currency,
     minimumFractionDigits: opts?.decimals ?? 2,
     maximumFractionDigits: opts?.decimals ?? 2,
   }).format(value);
+}
+
+/** Backward-compatible alias — all existing call sites continue to work. */
+export function formatINR(value: number, opts?: { compact?: boolean; decimals?: number }) {
+  return formatCurrency(value, "INR", opts);
 }
 
 export function formatNumber(value: number, decimals = 0) {

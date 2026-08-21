@@ -32,14 +32,30 @@ export async function uploadDocumentAction(
     return { error: "Choose a file to upload." };
   }
 
-  // Quota, enforced server-side against the subscription record.
   const tier = getTier(user.organisation.subscription.tierId);
-  const subscription = await prisma.subscription.findUnique({
-    where: { organisationId: user.organisation.id },
-  });
-  const used = subscription?.documentsUsed ?? 0;
 
-  if (tier.documentQuota !== null && used >= tier.documentQuota) {
+  // Atomic quota check-and-reserve: two simultaneous uploads cannot both
+  // observe a quota that only has one slot left. The reserve is compensated
+  // below if ingestion fails, so rejected files genuinely cost nothing (FR-1.2).
+  const quotaResult = await prisma.$transaction(async (tx) => {
+    const sub = await tx.subscription.findUnique({
+      where: { organisationId: user.organisation.id },
+    });
+    const used = sub?.documentsUsed ?? 0;
+
+    if (tier.documentQuota !== null && used >= tier.documentQuota) {
+      return { blocked: true as const };
+    }
+
+    await tx.subscription.update({
+      where: { organisationId: user.organisation.id },
+      data: { documentsUsed: { increment: 1 } },
+    });
+
+    return { blocked: false as const };
+  });
+
+  if (quotaResult.blocked) {
     return {
       error: `You have used all ${tier.documentQuota} documents on the ${tier.name} plan this cycle. Upgrade or wait for the reset to upload more.`,
     };
@@ -52,6 +68,8 @@ export async function uploadDocumentAction(
       ? "quotation"
       : "invoice";
 
+  // Ingestion runs outside the quota lock so concurrent uploads for the same
+  // org are not serialised for the duration of extraction.
   const result = await ingestDocument({
     organisationId: user.organisation.id,
     userId: user.id,
@@ -65,6 +83,11 @@ export async function uploadDocumentAction(
   });
 
   if (!result.ok || !result.invoiceId) {
+    // Compensating transaction: return the reserved quota slot.
+    await prisma.subscription.update({
+      where: { organisationId: user.organisation.id },
+      data: { documentsUsed: { decrement: 1 } },
+    });
     return { rejection: result.rejection };
   }
 

@@ -7,7 +7,7 @@ import { requirePermission, requireUser } from "@/lib/auth/guard";
 import { hashPassword } from "@/lib/auth/password";
 import { issueInvite, INVITE_TTL_HOURS } from "@/lib/auth/invites";
 import { getTier } from "@/lib/data/org";
-import { CITIES } from "@/lib/data/reference";
+import { ALL_CITIES } from "@/lib/data/cities";
 import type { Role } from "@/lib/types";
 
 /** Team and account management — FR-7.2. */
@@ -236,7 +236,7 @@ export async function updateOrganisationAction(
   if (gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) {
     return { error: "That GSTIN is not in the standard 15-character format." };
   }
-  if (!CITIES.some((city) => city.id === defaultCityId)) {
+  if (!ALL_CITIES.some((city) => city.id === defaultCityId)) {
     return { error: "Choose a valid default city." };
   }
 
