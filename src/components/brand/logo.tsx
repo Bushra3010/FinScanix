@@ -10,8 +10,8 @@ export function LogoMark({ className }: { className?: string }) {
     >
       <defs>
         <linearGradient id="fs-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--brand)" />
-          <stop offset="100%" stopColor="var(--brand-hover)" />
+          <stop offset="0%" stopColor="#14b8a6" />
+          <stop offset="100%" stopColor="#06b6d4" />
         </linearGradient>
       </defs>
       <rect width="32" height="32" rx="8.5" fill="url(#fs-mark)" />

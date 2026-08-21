@@ -8,26 +8,26 @@
  * whole app can flip with a single class on <html>.
  */
 :root {
-  --background: #f5f7fa;
+  --background: #f2fbfc;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-sunken: #eef1f6;
-  --foreground: #0d1526;
-  --muted: #f1f4f9;
-  --muted-foreground: #5b6b84;
-  --border: #dfe4ed;
-  --border-strong: #c6cede;
-  --ring: #1e4fd8;
+  --surface-sunken: #e8f8fa;
+  --foreground: #0d2026;
+  --muted: #edf8fa;
+  --muted-foreground: #4a7080;
+  --border: #ccedf2;
+  --border-strong: #a8dce5;
+  --ring: #06b6d4;
 
-  --brand: #3b4ee6;
-  --brand-hover: #3341cc;
+  --brand: #06b6d4;
+  --brand-hover: #0891b2;
   --brand-foreground: #ffffff;
-  --brand-soft: #ecedfd;
-  --brand-soft-foreground: #2b34ad;
+  --brand-soft: #ecfeff;
+  --brand-soft-foreground: #155e75;
 
   /* Marketing canvas: the tinted page the white content card floats on. */
-  --canvas: #eef0fc;
-  --canvas-accent: #dfe3fb;
+  --canvas: #e8f9fc;
+  --canvas-accent: #cffafe;
 
   --accent: #b45309;
   --accent-soft: #fdf1dc;
@@ -54,25 +54,25 @@
 }
 
 .dark {
-  --background: #080c14;
-  --surface: #101725;
-  --surface-raised: #161f30;
-  --surface-sunken: #0b111c;
-  --foreground: #e8eef9;
-  --muted: #161f30;
-  --muted-foreground: #94a3bb;
-  --border: #1e293c;
-  --border-strong: #2c3b53;
-  --ring: #6f92ff;
+  --background: #020f12;
+  --surface: #071820;
+  --surface-raised: #0c2230;
+  --surface-sunken: #040d10;
+  --foreground: #e0f7fa;
+  --muted: #0c2230;
+  --muted-foreground: #7ab8c8;
+  --border: #0e3040;
+  --border-strong: #1a4a5e;
+  --ring: #22d3ee;
 
-  --brand: #7b8bff;
-  --brand-hover: #93a0ff;
-  --brand-foreground: #0a1130;
-  --brand-soft: #1b2150;
-  --brand-soft-foreground: #c3ccff;
+  --brand: #22d3ee;
+  --brand-hover: #67e8f9;
+  --brand-foreground: #042030;
+  --brand-soft: #083344;
+  --brand-soft-foreground: #a5f3fc;
 
-  --canvas: #05080f;
-  --canvas-accent: #131a35;
+  --canvas: #020c10;
+  --canvas-accent: #0c2a38;
 
   --accent: #f0b445;
   --accent-soft: #2a2113;
