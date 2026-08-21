@@ -11,12 +11,18 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ expired?: string }>;
+  searchParams: Promise<{ expired?: string; reset?: string }>;
 }) {
   // Resolved here rather than in middleware: only this side can tell a live
   // session from a cookie that outlived it, and guessing wrong loops.
   if (await getSessionUser()) redirect("/app/dashboard");
 
-  const { expired } = await searchParams;
-  return <AuthForm mode="login" expired={expired === "1"} />;
+  const { expired, reset } = await searchParams;
+  return (
+    <AuthForm
+      mode="login"
+      expired={expired === "1"}
+      passwordReset={reset === "success"}
+    />
+  );
 }

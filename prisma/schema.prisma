@@ -65,9 +65,10 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organisation     Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisation     Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   sessions         Session[]
   inviteTokens     InviteToken[]
+  passwordResets   PasswordResetToken[]
   uploadedInvoices Invoice[]
   rateUploads      RateUpload[]
 
@@ -328,6 +329,22 @@ model ActivityEvent {
 
   @@index([organisationId, at])
   @@index([invoiceId])
+}
+
+/// One-time token for the forgot-password flow.
+/// The raw token travels in the reset URL; only its SHA-256 is stored.
+/// Tokens expire after 1 hour and are consumed on first use.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 /// One-time link that lets an invited member set their own password.

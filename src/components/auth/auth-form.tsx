@@ -19,11 +19,14 @@ export function AuthForm({
   mode,
   plan,
   expired,
+  passwordReset,
 }: {
   mode: "login" | "register";
   plan?: TierId;
   /** Set when the visitor arrived because their session had lapsed. */
   expired?: boolean;
+  /** Set when the visitor just completed a password reset. */
+  passwordReset?: boolean;
 }) {
   const isRegister = mode === "register";
   const [state, formAction, pending] = useActionState<AuthState, FormData>(
@@ -41,6 +44,15 @@ export function AuthForm({
           ? "14-day trial of the full pipeline. No card required."
           : "Verify vendor rates against SoR and live market pricing."}
       </p>
+
+      {passwordReset && (
+        <div className="mt-5 flex gap-2.5 rounded-lg border border-par/40 bg-par-soft/50 px-3.5 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-par" />
+          <p className="text-[12.5px] leading-relaxed text-foreground">
+            <span className="font-medium">Password updated.</span> Sign in with your new password.
+          </p>
+        </div>
+      )}
 
       {expired && (
         <div className="mt-5 flex gap-2.5 rounded-lg border border-warning/40 bg-warning-soft/50 px-3.5 py-3">
@@ -101,7 +113,7 @@ export function AuthForm({
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Password</Label>
             {!isRegister && (
-              <Link href="/login" className="mb-1.5 text-[12.5px] text-brand hover:underline">
+              <Link href="/forgot-password" className="mb-1.5 text-[12.5px] text-brand hover:underline">
                 Forgot password?
               </Link>
             )}
