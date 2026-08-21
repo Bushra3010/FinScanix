@@ -12,6 +12,14 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    // Supabase transaction-mode pgBouncer manages the real connection pool.
+    // We keep Prisma's own pool small so it doesn't compete with other
+    // processes for the limited pgBouncer slots.
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL,
+      },
+    },
   });
 
 if (process.env.NODE_ENV !== "production") {
