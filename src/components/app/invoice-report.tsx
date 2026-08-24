@@ -297,6 +297,102 @@ export function InvoiceReport({
     under: "border-par/40 text-par",
   };
 
+  /* ── Section C · Risk Red Flags ── */
+  interface RiskFlag {
+    category: "Pricing" | "Commercial" | "Calculation" | "Quantity" | "Procurement" | "Data Quality";
+    confidence: "High confidence" | "Medium confidence" | "Low confidence";
+    description: string;
+    evidence: string;
+    recommendation: string;
+  }
+  const riskFlags = useMemo<RiskFlag[]>(() => {
+    const flags: RiskFlag[] = [];
+
+    // Line-item arithmetic errors
+    const lineErrors = auditErrors.filter((e) => e.type === "Line Item Calculation Error");
+    if (lineErrors.length > 0) {
+      flags.push({
+        category: "Pricing",
+        confidence: "High confidence",
+        description: "Quoted amounts do not match sum of quantities multiplied by unit rates.",
+        evidence: `Line item ${lineErrors.map((e) => e.context.replace("Item #", "")).join(", ")} total discrepancy.`,
+        recommendation: "Request a corrected BOQ from the vendor before final approval.",
+      });
+    }
+
+    // Commercial note in extraction text
+    const note = (invoice.extractionNote ?? "").toLowerCase();
+    if (note.includes("budgetary") || note.includes("sample") || note.includes("indicative") || note.includes("non-binding")) {
+      flags.push({
+        category: "Commercial",
+        confidence: "High confidence",
+        description: "Indicated as budgetary sample only.",
+        evidence: "Commercial Notes section.",
+        recommendation: "Treat as a non-binding estimate and negotiate final fixed-price contract.",
+      });
+    }
+
+    // Tax or subtotal mismatch
+    if (auditErrors.some((e) => e.type === "Tax Calculation Error" || e.type === "Subtotal Mismatch")) {
+      flags.push({
+        category: "Calculation",
+        confidence: "High confidence",
+        description: "Subtotal or tax figure does not reconcile with the line items.",
+        evidence: auditErrors
+          .filter((e) => e.type === "Tax Calculation Error" || e.type === "Subtotal Mismatch")
+          .map((e) => e.type)
+          .join("; ") + " detected.",
+        recommendation: "Cross-check all arithmetic before processing payment.",
+      });
+    }
+
+    // Grand total mismatch
+    if (auditErrors.some((e) => e.type === "Grand Total Mismatch")) {
+      flags.push({
+        category: "Calculation",
+        confidence: "High confidence",
+        description: "Quoted grand total does not match the corrected subtotal plus tax.",
+        evidence: "Grand total mismatch detected in Pricing Summary.",
+        recommendation: "Reject document and request a revised quotation with corrected totals.",
+      });
+    }
+
+    // Over-priced market variance
+    if (summary.overCount > 0) {
+      flags.push({
+        category: "Pricing",
+        confidence: "Medium confidence",
+        description: `${summary.overCount} line item${summary.overCount === 1 ? "" : "s"} priced above current ${invoice.city.name} market benchmarks by ${Math.abs(summary.variancePct).toFixed(1)}%.`,
+        evidence: "Market comparison via IndiaMART, Moglix and live web prices.",
+        recommendation: "Renegotiate rates on flagged items using the attached market data.",
+      });
+    }
+
+    // Unmatched items
+    if (summary.unmatchedCount > 0) {
+      flags.push({
+        category: "Procurement",
+        confidence: "Medium confidence",
+        description: `${summary.unmatchedCount} item${summary.unmatchedCount === 1 ? "" : "s"} could not be matched to any market price benchmark.`,
+        evidence: `No benchmark found for ${summary.unmatchedCount} line item${summary.unmatchedCount === 1 ? "" : "s"}.`,
+        recommendation: "Request rate justification from vendor for all unmatched items.",
+      });
+    }
+
+    // Low extraction confidence
+    if (extractionConfidence === "Low") {
+      flags.push({
+        category: "Data Quality",
+        confidence: "Low confidence",
+        description: "One or more fields were extracted with low confidence due to poor document quality.",
+        evidence: "OCR confidence score below 80% on at least one line item.",
+        recommendation: "Verify all flagged line items manually before processing.",
+      });
+    }
+
+    return flags;
+  }, [auditErrors, summary, invoice.extractionNote, invoice.city.name, extractionConfidence]);
+
   /* ── Actionable Recommendations (AI-derived from audit findings) ── */
   const recommendations = useMemo<string[]>(() => {
     const recs: string[] = [];
@@ -1535,6 +1631,169 @@ export function InvoiceReport({
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Section C · Risk Red Flags ── */}
+      {riskFlags.length > 0 && (
+        <Card className="mt-6 overflow-hidden">
+          {/* Card header */}
+          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-over-soft/60 text-over">
+              <ShieldAlert className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold text-foreground">Section C · Risk Red Flags</h3>
+              <p className="text-[12.5px] text-muted-foreground">
+                Pricing, quantity, calculation, procurement and fraud-risk indicators
+              </p>
+            </div>
+          </div>
+
+          <CardContent className="space-y-4 pt-5">
+            {riskFlags.map((flag, idx) => {
+              const catStyle: Record<string, string> = {
+                Pricing:      "border-over/40 bg-over-soft/30 text-over",
+                Commercial:   "border-over/40 bg-over-soft/30 text-over",
+                Calculation:  "border-warning/40 bg-warning-soft/40 text-warning",
+                Quantity:     "border-warning/40 bg-warning-soft/40 text-warning",
+                Procurement:  "border-border bg-surface-sunken text-muted-foreground",
+                "Data Quality":"border-border bg-surface-sunken text-muted-foreground",
+              };
+              const confStyle: Record<string, string> = {
+                "High confidence":   "bg-brand-soft text-brand",
+                "Medium confidence": "bg-warning-soft text-warning",
+                "Low confidence":    "bg-over-soft/40 text-over",
+              };
+              return (
+                <div key={idx} className="rounded-xl border border-border bg-surface p-4 space-y-2">
+                  {/* Tags row */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-[11.5px] font-semibold",
+                      catStyle[flag.category] ?? "border-border text-muted-foreground",
+                    )}>
+                      {flag.category}
+                    </span>
+                    <span className={cn(
+                      "rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold",
+                      confStyle[flag.confidence] ?? "bg-surface-sunken text-muted-foreground",
+                    )}>
+                      {flag.confidence}
+                    </span>
+                  </div>
+                  {/* Description */}
+                  <p className="text-[13.5px] font-medium text-foreground">{flag.description}</p>
+                  {/* Evidence */}
+                  <p className="text-[12.5px] text-muted-foreground">
+                    <span className="font-medium text-foreground">Evidence:</span>{" "}
+                    {flag.evidence}
+                  </p>
+                  {/* Recommendation */}
+                  <p className="text-[12.5px]">
+                    <span className="font-semibold text-brand">Recommendation:</span>{" "}
+                    <span className="text-foreground">{flag.recommendation}</span>
+                  </p>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Pricing Details + Potential Savings (2-col) ── */}
+      <div className="mt-6 grid gap-5 sm:grid-cols-2">
+
+        {/* Pricing Details & Calculations */}
+        <Card>
+          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-[14px] font-semibold text-foreground">Pricing Details &amp; Calculations</h3>
+              <p className="text-[12px] text-muted-foreground">Mathematical accuracy verification</p>
+            </div>
+          </div>
+          <CardContent className="pt-4">
+            {[
+              { label: "Quoted subtotal",     value: invoice.subtotal > 0 ? invoice.subtotal : null },
+              { label: "Calculated subtotal", value: netValue },
+              { label: "Discount",            value: Math.max(0, invoice.subtotal - netValue) },
+              { label: "Tax",                 value: netValue * (invoice.taxPct / 100) },
+              { label: "Quoted grand total",  value: invoice.total > 0 ? invoice.total : null },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
+                <p className="text-[13px] text-muted-foreground">{label}</p>
+                <p className="tnum text-[13px] font-medium text-foreground">
+                  {value !== null && value !== undefined
+                    ? formatINR(value, { compact: true, decimals: 0 })
+                    : "—"}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Potential Savings (compact) */}
+        <Card>
+          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
+              <PiggyBank className="h-4 w-4" />
+            </div>
+            <h3 className="text-[14px] font-semibold text-foreground">Potential Savings</h3>
+          </div>
+          <CardContent className="pt-4">
+            {/* Current / Benchmark / Saving strip */}
+            <div className="mb-4 grid grid-cols-3 gap-2">
+              <div>
+                <p className="text-[11px] text-muted-foreground">Current</p>
+                <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
+                  {formatINR(netValue, { compact: true, decimals: 0 })}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-muted-foreground">Benchmark</p>
+                <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
+                  {summary.benchmarkTotal > 0
+                    ? formatINR(summary.benchmarkTotal, { compact: true, decimals: 0 })
+                    : "—"}
+                </p>
+              </div>
+              <div className="rounded-lg bg-brand-soft/50 px-2.5 py-1.5">
+                <p className="text-[11px] text-brand">Saving</p>
+                <p className="tnum mt-0.5 text-[16px] font-bold text-brand">
+                  {summary.potentialSaving > 0
+                    ? formatINR(summary.potentialSaving, { compact: true, decimals: 0 })
+                    : "—"}
+                </p>
+              </div>
+            </div>
+
+            <p className="mb-3 text-[11.5px] text-muted-foreground">
+              Estimated potential savings — not guaranteed.
+            </p>
+
+            {/* Per-item savings */}
+            <div className="space-y-1.5">
+              {overPricedLines.slice(0, 5).map((line) => {
+                const saving = line.amount - line.variance.benchmarkRate * line.quantity;
+                return (
+                  <div key={line.id} className="flex items-baseline justify-between gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
+                      {line.description}
+                    </p>
+                    <p className="tnum shrink-0 text-[12.5px] font-semibold text-brand">
+                      {formatINR(saving, { compact: true, decimals: 0 })}
+                    </p>
+                  </div>
+                );
+              })}
+              {overPricedLines.length === 0 && (
+                <p className="text-[12.5px] text-muted-foreground">No over-priced items identified.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
 }
