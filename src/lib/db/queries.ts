@@ -29,6 +29,23 @@ import type {
  * isolation is enforced here, not left to callers to remember.
  */
 
+/**
+ * pgBouncer in transaction mode can return DateTime columns as strings rather
+ * than Date objects. This helper normalises both forms to an ISO string so
+ * callers never call .toISOString() on a plain string.
+ */
+function toISO(value: Date | string | null | undefined): string {
+  if (!value) return new Date(0).toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value).toISOString();
+}
+/** Same as toISO but returns undefined when the value is falsy. */
+function toISOOpt(value: Date | string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value).toISOString();
+}
+
 const invoiceInclude = {
   city: true,
   uploadedBy: { select: { name: true } },
@@ -108,7 +125,7 @@ function toLineItem(row: InvoiceRow["lineItems"][number]): LineItem {
         unit: quote.unit,
         location: quote.location,
         url: quote.url,
-        fetchedAt: quote.fetchedAt.toISOString(),
+        fetchedAt: toISO(quote.fetchedAt),
         inStock: quote.inStock,
       }),
     ),
@@ -142,8 +159,8 @@ function toInvoice(row: InvoiceRow): Invoice {
     project: row.project,
     cityId: row.cityId,
     uploadedBy: row.uploadedBy.name,
-    uploadedAt: row.uploadedAt.toISOString(),
-    processedAt: row.processedAt?.toISOString(),
+    uploadedAt: toISO(row.uploadedAt),
+    processedAt: toISOOpt(row.processedAt),
     status: row.status as InvoiceStatus,
     fileName: row.fileName,
     fileSizeKb: row.fileSizeKb,
@@ -325,7 +342,7 @@ export async function listSorEntries(organisationId: string): Promise<SorEntry[]
       baseRate: row.baseRate,
       source: row.source,
       chapter: row.chapter,
-      effectiveFrom: row.effectiveFrom.toISOString(),
+      effectiveFrom: toISO(row.effectiveFrom),
       owned: row.organisationId !== null,
     }));
 }
@@ -374,7 +391,7 @@ export async function listCoverageGaps(
     if (line.sorEntryId !== null) continue;
     const key = line.description.toLowerCase().split(/\s+/).slice(0, 6).join(" ");
     const existing = groups.get(key);
-    const seen = line.invoice.uploadedAt.toISOString();
+    const seen = toISO(line.invoice.uploadedAt);
     if (existing) {
       existing.occurrences += 1;
       existing.value += line.amount;
@@ -412,7 +429,7 @@ export async function listUsers(organisationId: string): Promise<User[]> {
     email: row.email,
     role: row.role as Role,
     status: row.status as User["status"],
-    lastActive: row.lastActive.toISOString(),
+    lastActive: toISO(row.lastActive),
   }));
 }
 
@@ -427,7 +444,7 @@ export async function listActivity(organisationId: string, take = 20): Promise<A
     kind: row.kind as ActivityEvent["kind"],
     actor: row.actor,
     message: row.message,
-    at: row.at.toISOString(),
+    at: toISO(row.at),
     invoiceId: row.invoiceId ?? undefined,
   }));
 }
@@ -442,7 +459,7 @@ export async function listRateUploads(organisationId: string): Promise<RateUploa
     id: row.id,
     fileName: row.fileName,
     uploadedBy: row.uploadedBy.name,
-    uploadedAt: row.uploadedAt.toISOString(),
+    uploadedAt: toISO(row.uploadedAt),
     rowsTotal: row.rowsTotal,
     rowsAccepted: row.rowsAccepted,
     rowsRejected: row.rowsRejected,
@@ -463,8 +480,8 @@ export async function listCronJobs(organisationId: string): Promise<CronJob[]> {
     target: row.target,
     kind: row.kind as CronJob["kind"],
     scope: row.scope ? row.scope.split(",").filter(Boolean) : [],
-    lastRun: row.lastRun.toISOString(),
-    nextRun: row.nextRun.toISOString(),
+    lastRun: toISO(row.lastRun),
+    nextRun: toISO(row.nextRun),
     lastStatus: row.lastStatus as CronJob["lastStatus"],
     itemsRefreshed: row.itemsRefreshed,
     enabled: row.enabled,
