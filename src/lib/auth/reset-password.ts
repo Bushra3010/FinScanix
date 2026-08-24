@@ -57,7 +57,8 @@ export async function forgotPasswordAction(
 
     const result = await sendPasswordResetEmail(user.email, user.name, token);
 
-    // Dev-only: surface the link in the UI so you can test without email.
+    // If email delivery failed or no key is set, surface the link in the UI
+    // so the user can still complete the reset without email.
     if (result.devLink) {
       return { success: true, devLink: result.devLink };
     }

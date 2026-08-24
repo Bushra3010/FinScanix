@@ -57,7 +57,7 @@ export function HealthBadge({
       </Badge>
     );
   }
-  const label = flag === "over" ? "High" : flag === "under" ? "Below market" : "Competitive";
+  const label = flag === "over" ? "Above Market" : flag === "under" ? "Economical" : "Competitive";
   return (
     <Badge tone={flag} className={className}>
       {label}

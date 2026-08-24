@@ -1,12 +1,15 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import {
+  BarChart3,
   Check,
   CircleAlert,
+  ClipboardCheck,
   FileText,
   LoaderCircle,
   ScanLine,
+  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
@@ -19,6 +22,127 @@ import { useSession, useTier } from "@/components/app/session-context";
 import { uploadDocumentAction, type UploadState } from "@/lib/invoices/actions";
 import type { City } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/* ------------------------------------------------------------------ *
+ * Pipeline step definitions
+ * ------------------------------------------------------------------ */
+
+interface PipelineStep {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  /** Seconds after submission when this step should show as complete. */
+  completesAt: number;
+}
+
+const STEPS: PipelineStep[] = [
+  { id: "upload",   label: "Upload",         icon: Upload,       completesAt: 2  },
+  { id: "validate", label: "Validate",       icon: ShieldCheck,  completesAt: 5  },
+  { id: "ocr",      label: "OCR & Extract",  icon: ScanLine,     completesAt: 15 },
+  { id: "calc",     label: "Calculate",      icon: BarChart3,    completesAt: 25 },
+  { id: "market",   label: "Market Compare", icon: ClipboardCheck, completesAt: 40 },
+  { id: "risk",     label: "Risk Analyse",   icon: ShieldCheck,  completesAt: 52 },
+  { id: "audit",    label: "Audit Ready",    icon: FileText,     completesAt: 60 },
+];
+
+/* ------------------------------------------------------------------ *
+ * Pipeline progress component
+ * ------------------------------------------------------------------ */
+
+function PipelineProgress({ fileName, fileSizeMb }: { fileName: string; fileSizeMb: string }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const activeIdx = STEPS.findIndex((s) => elapsed < s.completesAt);
+  const doneCount = activeIdx === -1 ? STEPS.length : activeIdx;
+
+  return (
+    <div className="space-y-4">
+      {/* File chip */}
+      <div className="flex items-center gap-3 rounded-xl border-2 border-dashed border-brand/40 bg-brand-soft/30 px-4 py-3.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface">
+          <FileText className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-[13.5px] font-medium text-foreground">{fileName}</p>
+          <p className="text-[12px] text-muted-foreground">{fileSizeMb} KB</p>
+        </div>
+      </div>
+
+      {/* Pipeline card */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Processing pipeline</CardTitle>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
+              The AI reads your document, extracts line items, recomputes the math, searches the
+              web for real market benchmarks and assesses risk. This typically takes 45–60 seconds.
+            </p>
+          </div>
+          <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-brand whitespace-nowrap">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            Analysing… {elapsed}s
+          </span>
+        </CardHeader>
+
+        <CardContent>
+          <div className="grid grid-cols-7 gap-2">
+            {STEPS.map((step, idx) => {
+              const done = idx < doneCount;
+              const active = idx === doneCount;
+              const Icon = step.icon;
+
+              return (
+                <div key={step.id} className="flex flex-col items-center gap-2 text-center">
+                  <div
+                    className={cn(
+                      "flex h-14 w-14 items-center justify-center rounded-full border-2 transition-all duration-500",
+                      done
+                        ? "border-brand bg-brand text-brand-foreground"
+                        : active
+                          ? "border-brand bg-brand-soft text-brand"
+                          : "border-border bg-surface text-muted-foreground",
+                    )}
+                  >
+                    {done ? (
+                      <Check className="h-6 w-6" />
+                    ) : active ? (
+                      <LoaderCircle className="h-6 w-6 animate-spin" />
+                    ) : (
+                      <Icon className="h-5 w-5" />
+                    )}
+                  </div>
+                  <p
+                    className={cn(
+                      "text-[11px] font-medium leading-tight",
+                      done || active ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {step.label}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Analysing button */}
+      <Button size="lg" className="w-full" disabled>
+        <LoaderCircle className="h-4 w-4 animate-spin" />
+        Analysing…
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Main workbench
+ * ------------------------------------------------------------------ */
 
 export function UploadWorkbench({ cities }: { cities: City[] }) {
   const { user, cityId, setCityId } = useSession();
@@ -48,27 +172,31 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
     }
   }
 
+  /* Show pipeline animation while processing */
+  if (pending && picked) {
+    return (
+      <div className="mx-auto max-w-2xl">
+        <PipelineProgress
+          fileName={picked.name}
+          fileSizeMb={picked.sizeKb.toLocaleString()}
+        />
+      </div>
+    );
+  }
+
   return (
     <form action={formAction} className="grid gap-6 lg:grid-cols-[1.55fr_1fr]">
       <div className="space-y-4">
+        {/* Drop zone */}
         <Card>
           <CardContent className="p-4">
             <div
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                take(event.dataTransfer.files);
-              }}
+              onDrop={(e) => { e.preventDefault(); setDragging(false); take(e.dataTransfer.files); }}
               className={cn(
                 "flex flex-col items-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors",
-                dragging
-                  ? "border-brand bg-brand-soft/40"
-                  : "border-border-strong bg-surface-sunken/40",
+                dragging ? "border-brand bg-brand-soft/40" : "border-border-strong bg-surface-sunken/40",
                 exhausted && "pointer-events-none opacity-50",
               )}
             >
@@ -80,14 +208,11 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
                 <>
                   <p className="mt-4 text-[15px] font-semibold text-foreground">{picked.name}</p>
                   <p className="mt-1 text-[13px] text-muted-foreground">
-                    {(picked.sizeKb / 1024).toFixed(2)} MB · ready to process
+                    {picked.sizeKb.toLocaleString()} KB · ready to process
                   </p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setPicked(null);
-                      if (inputRef.current) inputRef.current.value = "";
-                    }}
+                    onClick={() => { setPicked(null); if (inputRef.current) inputRef.current.value = ""; }}
                     className="mt-3 inline-flex cursor-pointer items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -100,14 +225,9 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
                     Drop a vendor invoice or quotation here
                   </p>
                   <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
-                    PDF or image, up to 25 MB. Multi-page documents count once against your
-                    quota.
+                    PDF or image, up to 25 MB. Multi-page documents count once against your quota.
                   </p>
-                  <Button
-                    type="button"
-                    className="mt-5"
-                    onClick={() => inputRef.current?.click()}
-                  >
+                  <Button type="button" className="mt-5" onClick={() => inputRef.current?.click()}>
                     Choose file
                   </Button>
                 </>
@@ -119,13 +239,13 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
                 type="file"
                 accept=".pdf,image/*"
                 className="hidden"
-                onChange={(event) => take(event.target.files)}
+                onChange={(e) => take(e.target.files)}
               />
             </div>
           </CardContent>
         </Card>
 
-        {/* Quota / permission refusal */}
+        {/* Error */}
         {state.error && (
           <div className="flex items-start gap-2.5 rounded-xl border border-over/40 bg-over-soft/50 p-4">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
@@ -133,7 +253,7 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
           </div>
         )}
 
-        {/* Quality gate rejection — FR-1.2 */}
+        {/* Quality gate rejection */}
         {state.rejection && (
           <Card className="border-over/40">
             <CardHeader className="bg-over-soft/50">
@@ -169,17 +289,8 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
         )}
 
         <Button type="submit" size="lg" disabled={!picked || pending || exhausted}>
-          {pending ? (
-            <>
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              Extracting and benchmarking…
-            </>
-          ) : (
-            <>
-              <ScanLine className="h-4 w-4" />
-              Process document
-            </>
-          )}
+          <ScanLine className="h-4 w-4" />
+          Process document
         </Button>
       </div>
 
@@ -200,7 +311,7 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
                 id="cityId"
                 name="cityId"
                 value={cityId}
-                onChange={(event) => setCityId(event.target.value)}
+                onChange={(e) => setCityId(e.target.value)}
               >
                 {cities.map((city) => (
                   <option key={city.id} value={city.id}>
@@ -224,9 +335,7 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>This cycle</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>This cycle</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-baseline justify-between">
               <p className="tnum text-2xl font-semibold text-foreground">
@@ -244,8 +353,7 @@ export function UploadWorkbench({ cities }: { cities: City[] }) {
               />
             )}
             <p className="mt-2.5 text-[12px] leading-relaxed text-muted-foreground">
-              {tier.name} plan. The limit is enforced on the server — rejected files are never
-              counted.
+              {tier.name} plan. The limit is enforced on the server — rejected files are never counted.
             </p>
           </CardContent>
         </Card>

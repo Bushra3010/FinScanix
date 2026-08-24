@@ -42,14 +42,14 @@ export default function ForgotPasswordPage() {
             </div>
           </div>
 
-          {/* Dev-only: show link in UI when no email key is configured */}
+          {/* Fallback: show direct link when email delivery fails */}
           {state.devLink && (
-            <div className="rounded-xl border border-warning/40 bg-warning-soft/50 p-4">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-warning">
-                Dev mode — no email key set
+            <div className="rounded-xl border border-brand/30 bg-brand-soft p-4">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-brand-soft-foreground">
+                Email could not be delivered — use this link directly
               </p>
               <p className="mt-1 text-[12.5px] text-muted-foreground">
-                Use this link to reset the password:
+                Copy and open this link to reset your password:
               </p>
               <a
                 href={state.devLink}

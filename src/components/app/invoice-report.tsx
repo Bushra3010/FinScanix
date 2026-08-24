@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveLineCorrectionAction, setInvoiceCityAction } from "@/lib/invoices/actions";
 import {
+  ArrowRightLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -11,6 +12,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  ListOrdered,
   Pencil,
   LoaderCircle,
   Store,
@@ -141,23 +143,66 @@ export function InvoiceReport({
     { key: "unmatched", label: "Unmatched", count: summary.unmatchedCount },
   ];
 
+  /* ---- Section A derived values ---- */
+  const varSign = summary.variancePct > 0 ? "+" : "";
+  const varStr = `${varSign}${summary.variancePct.toFixed(1)}%`;
+  const isOverMarket = summary.variancePct > VARIANCE_CONFIG.parBandPct;
+  const isUnderMarket = summary.variancePct < -VARIANCE_CONFIG.parBandPct;
+
+  type ClassLabel = "Competitive" | "Above Market" | "Below Market";
+  const classLabel: ClassLabel = isOverMarket
+    ? "Above Market"
+    : isUnderMarket
+      ? "Below Market"
+      : "Competitive";
+
+  const classStyle: Record<ClassLabel, string> = {
+    Competitive:   "border-brand/40 bg-brand-soft text-brand-soft-foreground",
+    "Above Market":"border-over/40 bg-over-soft/60 text-over",
+    "Below Market":"border-par/40 bg-par-soft/60 text-par",
+  };
+
+  const summaryText =
+    classLabel === "Competitive"
+      ? `The quoted rates are generally aligned with current ${invoice.city.name} market benchmarks for the specified works.`
+      : classLabel === "Above Market"
+        ? `The quoted rates exceed current ${invoice.city.name} market benchmarks by ${summary.variancePct.toFixed(1)}%. Potential savings of ${formatINR(summary.potentialSaving, { compact: true, decimals: 0 })} are identifiable through renegotiation.`
+        : `The quoted rates are below current ${invoice.city.name} market benchmarks — this quotation appears competitive.`;
+
+  const benchmarkSource = `Internal ${invoice.city.name} Cost Indices`;
+
+  /* Simplified per-line table rows (matched lines only, up to 10 preview rows) */
+  const matchedLines = analysed.filter((l) => l.variance.benchmarkBasis !== "none");
+
+  const lineClassLabel: Record<string, string> = {
+    over:   "Above Market",
+    par:    "At Market",
+    under:  "Below Market",
+  };
+  const lineClassStyle: Record<string, string> = {
+    over:  "border-over/40 text-over",
+    par:   "border-border text-muted-foreground",
+    under: "border-par/40 text-par",
+  };
+
   return (
     <>
-      {/* What the document is, before what the engine made of it */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-10 gap-y-3 rounded-xl border border-border bg-surface px-5 py-4">
-        <Fact label="Total items" value={String(items.length)} />
-        <Fact label="BOQ value" value={formatINR(boqValue, { decimals: 0 })} hint={`incl. ${invoice.taxPct}% tax`} />
-        <Fact
-          label="Document type"
-          value={invoice.documentType === "quotation" ? "Quotation" : "Invoice"}
-        />
-        <Fact label="Extraction confidence" value={extractionConfidence} />
-        {invoice.language && <Fact label="Language" value={invoice.language} />}
-        <Fact label="Pages" value={String(invoice.pageCount)} />
-        <div>
-          <p className="text-[11.5px] font-medium tracking-wide text-muted-foreground uppercase">
-            Priced for
-          </p>
+      {/* ── Section A · Market Analysis ── */}
+      <Card className="mb-6 overflow-hidden">
+        {/* Header */}
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
+              <ArrowRightLeft className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle>Section A · Market Analysis</CardTitle>
+              <CardDescription>
+                Gemini market benchmarking vs quoted prices
+              </CardDescription>
+            </div>
+          </div>
+          {/* City repricing control */}
           {allows("invoice.correct") ? (
             <select
               value={invoice.cityId}
@@ -172,46 +217,131 @@ export function InvoiceReport({
                   router.refresh();
                 });
               }}
-              className="mt-0.5 cursor-pointer rounded-md border border-border-strong bg-surface px-2 py-0.5 text-[14px] font-semibold text-foreground focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none disabled:opacity-60"
+              className="cursor-pointer rounded-md border border-border-strong bg-surface px-2 py-1 text-[12.5px] text-foreground focus:border-brand focus:outline-none disabled:opacity-60"
             >
               {cities.map((city) => (
                 <option key={city.id} value={city.id}>
-                  {city.name} (x{city.indexFactor.toFixed(2)})
+                  {city.name} (×{city.indexFactor.toFixed(2)})
                 </option>
               ))}
             </select>
           ) : (
-            <p className="mt-0.5 text-[15px] font-semibold text-foreground">
-              {invoice.city.name}
-              <span className="ml-1.5 text-[11.5px] font-normal text-muted-foreground">
-                x{invoice.city.indexFactor.toFixed(2)}
-              </span>
-            </p>
+            <span className="rounded-full border border-border bg-surface-sunken px-3 py-1 text-[12px] text-muted-foreground">
+              {invoice.city.name} ×{invoice.city.indexFactor.toFixed(2)}
+            </span>
           )}
-        </div>
-      </div>
+        </CardHeader>
 
-      {/* Summary */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryTile label="Net billed value" value={formatINR(netValue, { decimals: 0 })} hint={`${items.length} line items`} />
-        <SummaryTile
-          label="Benchmark value"
-          value={formatINR(summary.benchmarkTotal, { decimals: 0 })}
-          hint={`${Math.round(VARIANCE_CONFIG.sorWeight * 100)}% SoR · ${Math.round(VARIANCE_CONFIG.marketWeight * 100)}% market`}
-        />
-        <SummaryTile
-          label="Variance"
-          value={`${summary.variancePct > 0 ? "+" : ""}${summary.variancePct.toFixed(1)}%`}
-          hint={formatINR(summary.totalVariance, { decimals: 0 })}
-          tone={summary.variancePct > VARIANCE_CONFIG.parBandPct ? "over" : summary.variancePct < -VARIANCE_CONFIG.parBandPct ? "under" : "par"}
-        />
-        <SummaryTile
-          label="Recoverable"
-          value={formatINR(summary.potentialSaving, { decimals: 0 })}
-          hint={`${summary.overCount} item${summary.overCount === 1 ? "" : "s"} above benchmark`}
-          tone="over"
-        />
-      </div>
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 divide-x divide-y divide-border border-b border-border sm:grid-cols-4 sm:divide-y-0">
+          <div className="px-5 py-4">
+            <p className="text-[11.5px] text-muted-foreground">Quoted Total</p>
+            <p className="mt-1 text-[20px] font-bold text-foreground">
+              {formatINR(netValue, { compact: true, decimals: 0 })}
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-[11.5px] text-muted-foreground">Benchmark Source</p>
+            <p className="mt-1 text-[14px] font-bold text-foreground">{benchmarkSource}</p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-[11.5px] text-muted-foreground">Market Variance</p>
+            <p
+              className={cn(
+                "mt-1 text-[20px] font-bold",
+                isOverMarket ? "text-over" : isUnderMarket ? "text-par" : "text-foreground",
+              )}
+            >
+              {varStr}
+            </p>
+          </div>
+          <div className="bg-brand-soft/30 px-5 py-4">
+            <p className="text-[11.5px] text-brand-soft-foreground">Potential Savings</p>
+            <p className="mt-1 text-[20px] font-bold text-brand">
+              {summary.potentialSaving > 0
+                ? formatINR(summary.potentialSaving, { compact: true, decimals: 0 })
+                : "—"}
+            </p>
+          </div>
+        </div>
+
+        {/* Classification + text + table */}
+        <CardContent className="pt-5">
+          <div className="mb-3 flex items-center gap-2.5">
+            <span className="text-[13.5px] text-muted-foreground">Overall classification:</span>
+            <span
+              className={cn(
+                "inline-block rounded border px-2.5 py-0.5 text-[12.5px] font-semibold",
+                classStyle[classLabel],
+              )}
+            >
+              {classLabel}
+            </span>
+          </div>
+
+          <p className="mb-5 text-[13.5px] leading-relaxed text-muted-foreground">
+            {summaryText}
+          </p>
+
+          {/* Simplified market comparison table */}
+          {matchedLines.length > 0 && (
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>ITEM</TH>
+                    <TH className="text-right">QUOTED</TH>
+                    <TH className="text-right">MARKET</TH>
+                    <TH className="text-right">VARIANCE</TH>
+                    <TH>CLASSIFICATION</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {matchedLines.slice(0, 10).map((line) => {
+                    const flag = line.variance.flag;
+                    const vPct = `${line.variance.variancePct > 0 ? "+" : ""}${line.variance.variancePct.toFixed(1)}%`;
+                    return (
+                      <tr key={line.id} className="hover:bg-muted/40">
+                        <TD>
+                          <span className="line-clamp-1 max-w-[240px] text-[13px]">
+                            {line.description}
+                          </span>
+                        </TD>
+                        <TD className="text-right tnum text-[13px]">
+                          {formatINR(line.rate)}
+                        </TD>
+                        <TD className="text-right tnum text-[13px]">
+                          {line.variance.benchmarkRate
+                            ? formatINR(line.variance.benchmarkRate)
+                            : "—"}
+                        </TD>
+                        <TD
+                          className={cn(
+                            "text-right tnum text-[13px] font-medium",
+                            flag === "over" ? "text-over" : flag === "under" ? "text-par" : "text-foreground",
+                          )}
+                        >
+                          {vPct}
+                        </TD>
+                        <TD>
+                          <span
+                            className={cn(
+                              "inline-block rounded border px-2 py-0.5 text-[11.5px] font-medium",
+                              lineClassStyle[flag] ?? "border-border text-muted-foreground",
+                            )}
+                          >
+                            {lineClassLabel[flag] ?? "Unmatched"}
+                          </span>
+                        </TD>
+                      </tr>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </TableWrap>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Review banner */}
       {lowConfidence.length > 0 && (
@@ -244,101 +374,152 @@ export function InvoiceReport({
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1.5">
+      {/* ── Section B · Bill of Quantities ── */}
+      <Card className="mt-6 overflow-hidden">
+
+        {/* Card header */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+              <ListOrdered className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold text-foreground">
+                Bill of Quantities (BOQ_Items)
+              </h3>
+              <p className="text-[12.5px] text-muted-foreground">
+                Gemini OCR-extracted line items with calculation verification
+              </p>
+            </div>
+          </div>
+
+          {/* Export + status */}
+          <div className="flex flex-wrap items-center gap-2">
+            {saving && (
+              <Badge tone="neutral">
+                <LoaderCircle className="h-3 w-3 animate-spin" />
+                Saving
+              </Badge>
+            )}
+            {saveError && <Badge tone="over">{saveError}</Badge>}
+            {corrections > 0 && !saving && (
+              <Badge tone="brand">
+                {corrections} correction{corrections === 1 ? "" : "s"} saved
+              </Badge>
+            )}
+            {invoice.hasOriginal && (
+              <a
+                href={`/api/invoices/${invoice.id}/original`}
+                className={buttonStyles({ variant: "outline", size: "sm" })}
+                title={`Open ${invoice.fileName} as uploaded`}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Original
+              </a>
+            )}
+            {allows("report.export") ? (
+              <>
+                <a
+                  href={`/api/invoices/${invoice.id}/export?format=pdf`}
+                  className={buttonStyles({ variant: "outline", size: "sm" })}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  PDF
+                </a>
+                {entitled("export_excel") ? (
+                  <a
+                    href={`/api/invoices/${invoice.id}/export?format=xlsx`}
+                    className={buttonStyles({ variant: "outline", size: "sm" })}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Excel
+                  </a>
+                ) : (
+                  <a
+                    href="/app/settings/billing"
+                    className={buttonStyles({ variant: "outline", size: "sm", className: "opacity-60" })}
+                    title="Excel export is available from the Professional tier"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Excel · upgrade
+                  </a>
+                )}
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Stats strip */}
+        <div className="grid grid-cols-2 divide-x divide-y divide-border border-b border-border sm:grid-cols-4 sm:divide-y-0">
+          <div className="px-5 py-3.5">
+            <p className="text-[11.5px] text-muted-foreground">Total Items</p>
+            <p className="mt-0.5 text-[18px] font-bold text-foreground">{items.length}</p>
+          </div>
+          <div className="px-5 py-3.5">
+            <p className="text-[11.5px] text-muted-foreground">BOQ Value</p>
+            <p className="mt-0.5 text-[18px] font-bold text-foreground">
+              {formatINR(boqValue, { compact: true, decimals: 0 })}
+            </p>
+          </div>
+          <div className="px-5 py-3.5">
+            <p className="text-[11.5px] text-muted-foreground">Document Type</p>
+            <p className="mt-0.5 text-[18px] font-bold text-foreground capitalize">
+              {invoice.documentType === "quotation" ? "Quotation" : "Invoice"}
+            </p>
+          </div>
+          <div className="px-5 py-3.5">
+            <p className="text-[11.5px] text-muted-foreground">Extraction</p>
+            <p
+              className={cn(
+                "mt-0.5 text-[18px] font-bold",
+                extractionConfidence === "High"
+                  ? "text-par"
+                  : extractionConfidence === "Medium"
+                    ? "text-warning"
+                    : "text-over",
+              )}
+            >
+              {extractionConfidence}
+            </p>
+          </div>
+        </div>
+
+        {/* Filter pills */}
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-3">
           {filters.map((entry) => (
             <button
               key={entry.key}
               type="button"
               onClick={() => setFilter(entry.key)}
               className={cn(
-                "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] transition-colors",
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors",
                 filter === entry.key
                   ? "border-brand bg-brand-soft font-medium text-brand-soft-foreground"
                   : "border-border bg-surface text-muted-foreground hover:text-foreground",
               )}
             >
               {entry.label}
-              <span className="tnum text-[11.5px] opacity-70">{entry.count}</span>
+              <span className="tnum text-[11px] opacity-70">{entry.count}</span>
             </button>
           ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {saving && (
-            <Badge tone="neutral">
-              <LoaderCircle className="h-3 w-3 animate-spin" />
-              Saving
-            </Badge>
-          )}
-          {saveError && <Badge tone="over">{saveError}</Badge>}
-          {corrections > 0 && !saving && (
-            <Badge tone="brand">
-              {corrections} correction{corrections === 1 ? "" : "s"} saved
-            </Badge>
-          )}
-          {invoice.hasOriginal && (
-            <a
-              href={`/api/invoices/${invoice.id}/original`}
-              className={buttonStyles({ variant: "outline", size: "sm" })}
-              title={`Open ${invoice.fileName} as uploaded`}
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Original
-            </a>
-          )}
-          {allows("report.export") ? (
-            <>
-              <a
-                href={`/api/invoices/${invoice.id}/export?format=pdf`}
-                className={buttonStyles({ variant: "outline", size: "sm" })}
-              >
-                <Download className="h-3.5 w-3.5" />
-                PDF
-              </a>
-              {entitled("export_excel") ? (
-                <a
-                  href={`/api/invoices/${invoice.id}/export?format=xlsx`}
-                  className={buttonStyles({ variant: "outline", size: "sm" })}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Excel
-                </a>
-              ) : (
-                <a
-                  href="/app/settings/billing"
-                  className={buttonStyles({ variant: "outline", size: "sm", className: "opacity-60" })}
-                  title="Excel export is available from the Professional tier"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Excel · upgrade
-                </a>
-              )}
-            </>
-          ) : (
-            <Badge tone="outline">Export not permitted for your role</Badge>
-          )}
-        </div>
-      </div>
-
-      {/* Line items */}
-      <Card className="mt-4">
+        {/* Line items table */}
         <TableWrap>
           <Table>
             <THead>
               <tr>
                 <TH className="w-8" />
                 <TH className="w-10">#</TH>
-                <TH>Description</TH>
-                <TH className="text-right">Qty</TH>
-                <TH>Unit</TH>
-                <TH className="text-right">Unit price</TH>
-                <TH className="text-right">Line total</TH>
-                <TH className="text-right">Calc total</TH>
-                <TH className="text-right">Benchmark</TH>
-                <TH className="text-right">Variance</TH>
-                <TH>Health</TH>
+                <TH>DESCRIPTION</TH>
+                <TH className="text-right">QTY</TH>
+                <TH>UNIT</TH>
+                <TH className="text-right">UNIT PRICE</TH>
+                <TH className="text-right">LINE TOTAL</TH>
+                <TH className="text-right">CALC TOTAL</TH>
+                <TH className="text-right">MARKET</TH>
+                <TH className="text-right">VARIANCE</TH>
+                <TH>HEALTH</TH>
                 <TH className="w-10" />
               </tr>
             </THead>
@@ -347,6 +528,7 @@ export function InvoiceReport({
                 const isOpen = expanded === line.id;
                 const isEditing = editing === line.id;
                 const unmatched = line.variance.benchmarkBasis === "none";
+                const calcDiffers = line.printedAmount !== undefined;
                 const uncertain =
                   Math.min(
                     line.confidence.description,
@@ -362,6 +544,7 @@ export function InvoiceReport({
                         isOpen && "bg-muted/40",
                       )}
                     >
+                      {/* Expand toggle */}
                       <TD>
                         <button
                           type="button"
@@ -376,8 +559,12 @@ export function InvoiceReport({
                           )}
                         </button>
                       </TD>
+
+                      {/* Row number */}
                       <TD className="tnum text-[12.5px] text-muted-foreground">{line.srNo}</TD>
-                      <TD className="max-w-md">
+
+                      {/* Description */}
+                      <TD className="max-w-xs">
                         <p
                           className={cn(
                             "text-[13px] leading-snug text-foreground",
@@ -386,16 +573,13 @@ export function InvoiceReport({
                         >
                           {line.description}
                         </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                           {line.sorMatch ? (
-                            <span className="text-[11px] text-muted-foreground">
-                              {line.sorMatch.code} · match{" "}
-                              {(line.sorMatch.matchScore * 100).toFixed(0)}%
+                            <span className="text-[10.5px] text-muted-foreground">
+                              {line.sorMatch.code} · {(line.sorMatch.matchScore * 100).toFixed(0)}%
                             </span>
                           ) : (
-                            <span className="text-[11px] text-muted-foreground">
-                              No SoR match
-                            </span>
+                            <span className="text-[10.5px] text-muted-foreground">No SoR match</span>
                           )}
                           {line.corrected && <Badge tone="brand">Corrected</Badge>}
                           {uncertain && !line.corrected && (
@@ -403,26 +587,30 @@ export function InvoiceReport({
                           )}
                         </div>
                       </TD>
+
+                      {/* QTY */}
                       <TD className="tnum text-right text-[13px] whitespace-nowrap">
                         {isEditing ? (
                           <input
                             type="number"
                             defaultValue={line.quantity}
-                            onBlur={(event) =>
-                              applyEdit(line.id, { quantity: Number(event.target.value) })
-                            }
+                            onBlur={(e) => applyEdit(line.id, { quantity: Number(e.target.value) })}
                             className="tnum h-8 w-24 rounded border border-brand bg-background px-2 text-right text-[13px]"
                           />
                         ) : (
                           formatNumber(line.quantity)
                         )}
                       </TD>
+
+                      {/* UNIT */}
                       <TD className="text-[12.5px] whitespace-nowrap text-muted-foreground">
                         {line.unit}
                       </TD>
+
+                      {/* UNIT PRICE */}
                       <TD
                         className={cn(
-                          "tnum text-right text-[13px] whitespace-nowrap",
+                          "tnum text-right text-[13px] font-medium whitespace-nowrap",
                           line.confidence.rate < LOW_CONFIDENCE &&
                             !line.corrected &&
                             "decoration-warning underline decoration-wavy underline-offset-4",
@@ -432,61 +620,60 @@ export function InvoiceReport({
                           <input
                             type="number"
                             defaultValue={line.rate}
-                            onBlur={(event) =>
-                              applyEdit(line.id, { rate: Number(event.target.value) })
-                            }
+                            onBlur={(e) => applyEdit(line.id, { rate: Number(e.target.value) })}
                             className="tnum h-8 w-28 rounded border border-brand bg-background px-2 text-right text-[13px]"
                           />
                         ) : (
-                          formatINR(line.rate, { decimals: 2 })
+                          formatINR(line.rate, { compact: true })
                         )}
                       </TD>
-                      <TD className="tnum text-right text-[13px] whitespace-nowrap">
-                        {formatINR(line.printedAmount ?? line.amount, { decimals: 2 })}
+
+                      {/* LINE TOTAL */}
+                      <TD className="tnum text-right text-[13px] font-medium whitespace-nowrap">
+                        {formatINR(line.printedAmount ?? line.amount, { compact: true })}
                       </TD>
+
+                      {/* CALC TOTAL — red when it differs from the printed amount */}
                       <TD
                         className={cn(
-                          "tnum text-right text-[13px] whitespace-nowrap",
-                          // Flagged only where the document's own total disagrees
-                          // with quantity x unit price, which is the figure a
-                          // reviewer needs pointed out rather than reconciled for
-                          // them. The footer says why.
-                          line.printedAmount !== undefined
-                            ? "font-medium text-over"
-                            : "text-muted-foreground",
+                          "tnum text-right text-[13px] font-medium whitespace-nowrap",
+                          calcDiffers ? "text-over" : "text-muted-foreground",
                         )}
                         title={
-                          line.printedAmount !== undefined
-                            ? "Quantity x unit price. Differs from the printed line total — see the note below the table."
+                          calcDiffers
+                            ? "Qty × unit price differs from the printed line total"
                             : undefined
                         }
                       >
-                        {formatINR(line.amount, { decimals: 2 })}
+                        {formatINR(line.amount, { compact: true })}
                       </TD>
+
+                      {/* MARKET — shows benchmark unit rate for direct rate comparison */}
                       <TD className="tnum text-right text-[13px] whitespace-nowrap text-muted-foreground">
                         {unmatched
                           ? "—"
-                          : formatINR(line.variance.benchmarkRate * line.quantity, { decimals: 2 })}
+                          : formatINR(line.variance.benchmarkRate, { compact: true })}
                       </TD>
+
+                      {/* VARIANCE */}
                       <TD className="text-right whitespace-nowrap">
                         {unmatched ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
-                          <>
-                            <VariancePct
-                              value={line.variance.variancePct}
-                              flag={line.variance.flag}
-                              className="text-[13px]"
-                            />
-                            <p className="tnum mt-0.5 text-[11px] text-muted-foreground">
-                              {formatINR(line.variance.varianceAmount, { compact: true })}
-                            </p>
-                          </>
+                          <VariancePct
+                            value={line.variance.variancePct}
+                            flag={line.variance.flag}
+                            className="text-[13px]"
+                          />
                         )}
                       </TD>
+
+                      {/* HEALTH */}
                       <TD>
                         <HealthBadge flag={line.variance.flag} unmatched={unmatched} />
                       </TD>
+
+                      {/* Edit */}
                       <TD>
                         {allows("invoice.correct") && (
                           <button
@@ -496,7 +683,7 @@ export function InvoiceReport({
                             aria-label={isEditing ? "Finish editing" : "Correct this line"}
                           >
                             {isEditing ? (
-                              <Check className="h-3.5 w-3.5" />
+                              <Check className="h-3.5 w-3.5 text-par" />
                             ) : (
                               <Pencil className="h-3.5 w-3.5" />
                             )}
@@ -505,6 +692,7 @@ export function InvoiceReport({
                       </TD>
                     </tr>
 
+                    {/* Evidence drawer */}
                     {isOpen && (
                       <tr className="bg-surface-sunken/40">
                         <td colSpan={12} className="px-5 py-5">
@@ -521,46 +709,38 @@ export function InvoiceReport({
 
         {visible.length === 0 && (
           <p className="px-5 py-10 text-center text-[13px] text-muted-foreground">
-            No line items in this view.
+            No line items match this filter.
           </p>
         )}
 
-        {/* How the figures above were obtained, and anything that would
-            otherwise read as an extraction error. */}
-        <div className="flex flex-wrap items-start gap-x-6 gap-y-2 border-t border-border px-5 py-3">
-          <span className="text-[12px] text-muted-foreground">
-            Extraction confidence{" "}
-            <span
-              className={cn(
-                "font-medium",
-                extractionConfidence === "High"
-                  ? "text-par"
-                  : extractionConfidence === "Medium"
-                    ? "text-warning"
-                    : "text-over",
-              )}
-            >
-              {extractionConfidence}
-            </span>
-          </span>
-          {invoice.language && (
-            <span className="text-[12px] text-muted-foreground">
-              Language <span className="font-medium text-foreground">{invoice.language}</span>
-            </span>
-          )}
-          <span className="text-[12px] text-muted-foreground">
-            Source{" "}
+        {/* Footer: extraction metadata */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 border-t border-border bg-surface-sunken/40 px-5 py-3">
+          <span className="text-[11.5px] text-muted-foreground">
+            Source:{" "}
             <span className="font-medium text-foreground">
               {invoice.quality.checks.some((c) => c.id === "ocr" && c.passed)
-                ? "OCR (vision model)"
+                ? "OCR · vision model"
                 : "Embedded text layer"}
             </span>
           </span>
-          {restated > 0 && (
-            <span className="text-[12px] text-muted-foreground">
-              Restated lines <span className="font-medium text-over">{restated}</span>
+          {invoice.language && (
+            <span className="text-[11.5px] text-muted-foreground">
+              Language:{" "}
+              <span className="font-medium text-foreground">{invoice.language}</span>
             </span>
           )}
+          {restated > 0 && (
+            <span className="text-[11.5px] text-muted-foreground">
+              Restated lines:{" "}
+              <span className="font-medium text-over">{restated}</span>
+            </span>
+          )}
+          <span className="text-[11.5px] text-muted-foreground">
+            Market column = benchmark unit rate ·{" "}
+            {Math.round(VARIANCE_CONFIG.sorWeight * 100)}% SoR +{" "}
+            {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% market median ·
+            par band ±{VARIANCE_CONFIG.parBandPct}%
+          </span>
         </div>
 
         {invoice.extractionNote && (
@@ -572,16 +752,6 @@ export function InvoiceReport({
           </div>
         )}
       </Card>
-
-      <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-        Benchmark = {Math.round(VARIANCE_CONFIG.sorWeight * 100)}% location-adjusted SoR rate +{" "}
-        {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% median market quote, where both exist.
-        Items within ±{VARIANCE_CONFIG.parBandPct}% of benchmark are reported at par. The engine
-        is deterministic: re-running this document reproduces this report exactly.
-        {" "}Line total is the figure printed on the document; calc total is quantity x unit
-        price. Where the two differ the calc total is marked, and benchmarking uses the pre-tax
-        unit price either way.
-      </p>
     </>
   );
 }

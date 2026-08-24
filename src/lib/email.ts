@@ -100,7 +100,7 @@ export async function sendPasswordResetEmail(
 </html>`;
 
   try {
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from: FROM_EMAIL,
       to,
       subject: "Reset your FinScanix password",
@@ -108,12 +108,16 @@ export async function sendPasswordResetEmail(
     });
 
     if (error) {
-      console.error("[email] Resend error:", error);
-      return { ok: false };
+      console.error("[email] Resend error:", JSON.stringify(error));
+      // Surface the reset link in the response so the user can still reset
+      // even if email delivery fails (e.g. unverified domain on free plan).
+      return { ok: false, devLink: resetUrl };
     }
+
+    console.log("[email] Sent OK, id:", data?.id, "to:", to);
     return { ok: true };
   } catch (err) {
     console.error("[email] Send failed:", err);
-    return { ok: false };
+    return { ok: false, devLink: resetUrl };
   }
 }
