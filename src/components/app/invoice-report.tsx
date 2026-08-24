@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   Store,
   TriangleAlert,
+  Table2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonStyles } from "@/components/ui/button";
@@ -493,6 +494,124 @@ export function InvoiceReport({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── 2. Corrected Calculation ── */}
+      {analysed.length > 0 && (
+        <div className="mt-6">
+          {/* Section heading */}
+          <div className="mb-4 flex items-center gap-2.5">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-surface-sunken text-muted-foreground">
+              <Table2 className="h-4 w-4" />
+            </div>
+            <h3 className="text-[15px] font-semibold text-foreground">2. Corrected Calculation</h3>
+          </div>
+
+          <Card>
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH className="w-10">#</TH>
+                    <TH>DESCRIPTION</TH>
+                    <TH className="text-right">QTY</TH>
+                    <TH className="text-right">UNIT PRICE</TH>
+                    <TH className="text-right">EXPECTED TOTAL</TH>
+                    <TH className="text-right">QUOTED TOTAL</TH>
+                    <TH className="text-right">DIFF</TH>
+                    <TH className="text-center">STATUS</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {analysed.map((line) => {
+                    const hasDiff = line.printedAmount !== undefined;
+                    const quotedTotal = line.printedAmount ?? line.amount;
+                    const diff = hasDiff ? (line.printedAmount! - line.amount) : 0;
+
+                    return (
+                      <tr
+                        key={line.id}
+                        className={cn(
+                          "transition-colors",
+                          hasDiff
+                            ? "bg-over-soft/20 hover:bg-over-soft/30"
+                            : "hover:bg-muted/30",
+                        )}
+                      >
+                        {/* # */}
+                        <TD className="tnum text-[12.5px] text-muted-foreground">{line.srNo}</TD>
+
+                        {/* DESCRIPTION */}
+                        <TD className="max-w-xs">
+                          <p className="line-clamp-2 text-[13px] leading-snug text-foreground">
+                            {line.description}
+                          </p>
+                        </TD>
+
+                        {/* QTY + UNIT */}
+                        <TD className="tnum text-right text-[13px] text-muted-foreground whitespace-nowrap">
+                          {formatNumber(line.quantity)} {line.unit}
+                        </TD>
+
+                        {/* UNIT PRICE */}
+                        <TD className="tnum text-right text-[13px] font-medium whitespace-nowrap">
+                          {formatINR(line.rate, { compact: true })}
+                        </TD>
+
+                        {/* EXPECTED TOTAL — teal when discrepancy exists */}
+                        <TD
+                          className={cn(
+                            "tnum text-right text-[13px] font-semibold whitespace-nowrap",
+                            hasDiff ? "text-brand" : "text-foreground",
+                          )}
+                        >
+                          {formatINR(line.amount, { compact: true })}
+                        </TD>
+
+                        {/* QUOTED TOTAL — red when discrepancy exists */}
+                        <TD
+                          className={cn(
+                            "tnum text-right text-[13px] whitespace-nowrap",
+                            hasDiff ? "font-medium text-over" : "text-foreground",
+                          )}
+                        >
+                          {formatINR(quotedTotal, { compact: true })}
+                        </TD>
+
+                        {/* DIFF */}
+                        <TD
+                          className={cn(
+                            "tnum text-right text-[13px] font-medium whitespace-nowrap",
+                            hasDiff ? "text-over" : "text-muted-foreground",
+                          )}
+                        >
+                          {hasDiff
+                            ? `${diff > 0 ? "+" : ""}${formatINR(diff, { compact: true })}`
+                            : "—"}
+                        </TD>
+
+                        {/* STATUS */}
+                        <TD className="text-center whitespace-nowrap">
+                          {hasDiff ? (
+                            <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-over">
+                              <ArrowUp className="h-3 w-3" />
+                              Discrepancy
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[12.5px] font-medium text-par">
+                              <Check className="h-3.5 w-3.5" />
+                              Verified
+                            </span>
+                          )}
+                        </TD>
+                      </tr>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </TableWrap>
+          </Card>
         </div>
       )}
 
