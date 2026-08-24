@@ -11,9 +11,11 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  ClipboardList,
   Download,
   ExternalLink,
   FileText,
+  ListChecks,
   ListOrdered,
   Minus,
   Pencil,
@@ -293,6 +295,98 @@ export function InvoiceReport({
     par:   "border-border text-muted-foreground",
     under: "border-par/40 text-par",
   };
+
+  /* ── Actionable Recommendations (AI-derived from audit findings) ── */
+  const recommendations = useMemo<string[]>(() => {
+    const recs: string[] = [];
+    if (auditErrors.some((e) => e.type === "Line Item Calculation Error"))
+      recs.push(
+        "Implement automated validation scripts within the invoicing system to cross-verify line item calculations against quantity and unit price before finalizing documents.",
+      );
+    if (summary.overCount > 0)
+      recs.push(
+        "Conduct an immediate audit of all high-risk line items to rectify existing pricing discrepancies and prevent further financial leakage.",
+      );
+    if (auditErrors.some((e) => e.type === "Tax Calculation Error"))
+      recs.push(
+        "Standardize tax calculation protocols to ensure the applied rates align consistently with the corrected subtotal amounts.",
+      );
+    if (auditErrors.some((e) => e.type === "Subtotal Mismatch" || e.type === "Grand Total Mismatch"))
+      recs.push(
+        "Perform a comprehensive review of the current procurement software to address the root causes of the subtotal and grand total mismatches.",
+      );
+    if (summary.unmatchedCount > 0)
+      recs.push(
+        "Request a detailed rate schedule from the vendor for all unmatched line items to enable complete market-rate benchmarking.",
+      );
+    if (summary.potentialSaving > 0)
+      recs.push(
+        `Renegotiate ${summary.overCount} over-priced line item${summary.overCount === 1 ? "" : "s"} using the market benchmarks provided — estimated savings: ${formatINR(summary.potentialSaving, { compact: true, decimals: 0 })}.`,
+      );
+    if (recs.length === 0)
+      recs.push(
+        "Continue periodic market-rate benchmarking to maintain pricing competitiveness across all future quotations.",
+      );
+    return recs;
+  }, [auditErrors, summary]);
+
+  /* ── SOW & Gap Analysis (Section B) ── */
+  const sowAnalysis = useMemo(() => {
+    const descs = analysed.map((l) => l.description.toLowerCase());
+
+    const SCOPE_CATS: { name: string; kw: string[] }[] = [
+      { name: "Site setup",              kw: ["site", "mobilisation", "hoarding", "temporary"] },
+      { name: "Excavation",              kw: ["excavat", "earthwork", "earth work", "fill", "grading"] },
+      { name: "RCC / Civil structure",   kw: ["rcc", "concrete", "reinforce", "shuttering", "column", "beam", "slab", "foundation", "brick", "block"] },
+      { name: "Waterproofing",           kw: ["waterproof", "damp", "moisture"] },
+      { name: "Flooring & Tiles",        kw: ["tile", "tiles", "flooring", "marble", "granite", "vitrified", "ceramic"] },
+      { name: "Pool & Water Features",   kw: ["pool", "swimming", "spa", "jacuzzi", "fountain"] },
+      { name: "Plumbing & Drainage",     kw: ["plumb", "pipe", "drain", "water supply", "sewage", "cpvc", "upvc", "fitting"] },
+      { name: "Filtration & Treatment",  kw: ["filter", "filtration", "sand filter", "media", "uv", "chlorin", "dosing", "skimmer"] },
+      { name: "Electrical",              kw: ["electric", "wiring", "cable", "conduit", "switch", "panel", "mcb", "light"] },
+      { name: "Testing / Commissioning", kw: ["test", "commission", "trial", "handover"] },
+      { name: "Finishing Works",         kw: ["paint", "plaster", "putty", "primer", "false ceiling", "partition", "gypsum"] },
+    ];
+
+    const extractedScope = SCOPE_CATS
+      .filter(({ kw }) => kw.some((k) => descs.some((d) => d.includes(k))))
+      .map((c) => c.name);
+
+    const STANDARD_CHECKLIST = [
+      "Soil testing report cost",
+      "Statutory approval fees",
+      "Architectural design fees",
+      "Insurance and performance bond",
+      "Temporary utilities (power / water)",
+    ];
+    const missingItems = STANDARD_CHECKLIST.filter((item) => {
+      const key = item.toLowerCase().split(" ")[0];
+      return !descs.some((d) => d.includes(key));
+    });
+
+    const AMBIG_KW = ["branded", "equivalent", "similar", "approved make", "as per specification"];
+    const ambiguities: string[] = [];
+    for (const line of analysed) {
+      const dl = line.description.toLowerCase();
+      if (AMBIG_KW.some((k) => dl.includes(k))) {
+        ambiguities.push(`Exact definition of '${line.description.trim()}' specification`);
+      }
+    }
+    if (!descs.some((d) => d.includes("temporary") && (d.includes("water") || d.includes("electric")))) {
+      ambiguities.push("Responsibility for temporary water and electricity supply");
+    }
+
+    const issueCount = missingItems.length + Math.min(ambiguities.length, 3);
+    const maxIssues = STANDARD_CHECKLIST.length + 3;
+    const scopeRiskScore = Math.max(10, Math.round(100 - (issueCount / maxIssues) * 100));
+
+    return {
+      extractedScope: extractedScope.length > 0 ? extractedScope : ["General civil works"],
+      missingItems,
+      ambiguities: ambiguities.slice(0, 4),
+      scopeRiskScore,
+    };
+  }, [analysed]);
 
   return (
     <>
@@ -1293,6 +1387,111 @@ export function InvoiceReport({
 
       {/* ── Final Audit Summary ── */}
       <FinalAuditSummary summary={summary} currency={invoice.city?.currency ?? "INR"} />
+
+      {/* ── Actionable Recommendations ── */}
+      <Card className="mt-6">
+        <CardHeader className="border-b border-border pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+              <ListChecks className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle>Actionable Recommendations</CardTitle>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-5">
+          <ol className="space-y-3">
+            {recommendations.map((rec, idx) => (
+              <li key={idx} className="flex items-start gap-4">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
+                  {idx + 1}
+                </span>
+                <p className="text-[13.5px] leading-relaxed text-foreground">{rec}</p>
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
+
+      {/* ── Section B · SOW & Gap Analysis ── */}
+      <Card className="mt-6 overflow-hidden">
+        {/* Card header */}
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground">
+            <ClipboardList className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-[15px] font-semibold text-foreground">Section B · SOW &amp; Gap Analysis</h3>
+            <p className="text-[12.5px] text-muted-foreground">Scope of work, missing items and ambiguities</p>
+          </div>
+        </div>
+
+        <CardContent className="pt-5">
+          <div className="grid gap-6 sm:grid-cols-2">
+            {/* Extracted Scope */}
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-muted-foreground" />
+                <p className="text-[13px] font-semibold text-foreground">Extracted Scope</p>
+              </div>
+              <ul className="space-y-2">
+                {sowAnalysis.extractedScope.map((item) => (
+                  <li key={item} className="flex items-center gap-2.5 text-[13px] text-foreground">
+                    <Check className="h-3.5 w-3.5 shrink-0 text-par" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Missing Items + Ambiguities */}
+            <div className="space-y-5">
+              {sowAnalysis.missingItems.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <TriangleAlert className="h-4 w-4 text-warning" />
+                    <p className="text-[13px] font-semibold text-foreground">Missing Items</p>
+                  </div>
+                  <ul className="space-y-2">
+                    {sowAnalysis.missingItems.map((item) => (
+                      <li key={item} className="flex items-start gap-2.5 text-[13px] text-foreground">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {sowAnalysis.ambiguities.length > 0 && (
+                <div>
+                  <p className="mb-3 text-[13px] font-semibold text-foreground">Ambiguities</p>
+                  <ul className="space-y-2">
+                    {sowAnalysis.ambiguities.map((item) => (
+                      <li key={item} className="flex items-start gap-2.5 text-[13px] text-foreground">
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Scope Risk Score */}
+          <div className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface-sunken px-5 py-3.5">
+            <p className="text-[13.5px] font-medium text-foreground">Scope Risk Score</p>
+            <p className={cn(
+              "tnum text-[18px] font-bold",
+              sowAnalysis.scopeRiskScore >= 75 ? "text-par" : sowAnalysis.scopeRiskScore >= 50 ? "text-warning" : "text-over",
+            )}>
+              {sowAnalysis.scopeRiskScore} / 100
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </>
   );
 }
