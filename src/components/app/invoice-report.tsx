@@ -251,6 +251,38 @@ export function InvoiceReport({
   /* Simplified per-line table rows (matched lines only, up to 10 preview rows) */
   const matchedLines = analysed.filter((l) => l.variance.benchmarkBasis !== "none");
 
+  /* ── Risk Impact sub-scores (section 3) ── */
+  const _totalItems = analysed.length || 1;
+  const _varPenalty   = summary.variancePct > 0 ? Math.min(50, summary.variancePct * 3) : 0;
+  const _unmatchedPen = Math.min(25, (summary.unmatchedCount / _totalItems) * 25);
+  const riskAuditScore = Math.max(0, Math.round(100 - _varPenalty - _unmatchedPen));
+  const riskPricingAcc = Math.max(0, Math.round(
+    40 - Math.min(40, (summary.overCount / _totalItems) * 30 + Math.max(0, summary.variancePct) * 0.5),
+  ));
+  const riskCompliance = Math.round(invoice.quality.score * 20);
+  const riskCostEff    = Math.max(0, Math.round(
+    25 - Math.min(25, (summary.potentialSaving / Math.max(boqValue, 1)) * 100 * 3),
+  ));
+  const riskMarketCov  = Math.round((1 - summary.unmatchedCount / _totalItems) * 15);
+  const riskBaseLevel  = riskAuditScore >= 75 ? "Low" : riskAuditScore >= 55 ? "Moderate" : "High";
+  const _highSevErrors = auditErrors.filter((e) => e.severity === "High").length;
+  const riskAdjusted   =
+    _highSevErrors >= 2 || (_highSevErrors >= 1 && riskBaseLevel === "High")
+      ? "Critical"
+      : _highSevErrors >= 1 && riskBaseLevel !== "Low"
+        ? "High"
+        : riskBaseLevel;
+  const riskElevated  = riskAdjusted !== riskBaseLevel;
+  const riskSubScores = [
+    { label: "Pricing Accuracy", score: riskPricingAcc, max: 40 },
+    { label: "Compliance",       score: riskCompliance,  max: 20 },
+    { label: "Cost Efficiency",  score: riskCostEff,     max: 25 },
+    { label: "Market Coverage",  score: riskMarketCov,   max: 15 },
+  ];
+  const overPricedLines = analysed.filter(
+    (l) => l.variance.flag === "over" && l.variance.benchmarkBasis !== "none",
+  );
+
   const lineClassLabel: Record<string, string> = {
     over:   "Above Market",
     par:    "At Market",
@@ -614,6 +646,188 @@ export function InvoiceReport({
           </Card>
         </div>
       )}
+
+      {/* ── 4. Potential Savings ── */}
+      {summary.potentialSaving > 0 && (
+        <div className="mt-6">
+          {/* Section header */}
+          <div className="mb-4 flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+              <PiggyBank className="h-4 w-4" />
+            </div>
+            <h3 className="text-[15px] font-semibold text-foreground">4. Potential Savings</h3>
+          </div>
+
+          <Card className="overflow-hidden">
+            {/* Stat strip */}
+            <div className="grid grid-cols-2 divide-border border-b border-border sm:grid-cols-4 sm:divide-x">
+              <div className="border-b border-border bg-over-soft/30 px-5 py-4 sm:border-b-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-over">Quoted Grand Total</p>
+                <p className="tnum mt-1.5 text-[22px] font-bold text-over">
+                  {formatINR(boqValue, { compact: true, decimals: 0 })}
+                </p>
+              </div>
+              <div className="border-b border-border px-5 py-4 sm:border-b-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Market-Rate Total</p>
+                <p className="tnum mt-1.5 text-[22px] font-bold text-foreground">
+                  {summary.benchmarkTotal > 0
+                    ? formatINR(summary.benchmarkTotal * (1 + invoice.taxPct / 100), { compact: true, decimals: 0 })
+                    : "—"}
+                </p>
+              </div>
+              <div className="border-b border-border bg-brand-soft/30 px-5 py-4 sm:border-b-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-brand">Total Potential Savings</p>
+                <p className="tnum mt-1.5 text-[22px] font-bold text-brand">
+                  {formatINR(summary.potentialSaving, { compact: true, decimals: 0 })}
+                </p>
+              </div>
+              <div className="bg-brand-soft/15 px-5 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Savings %</p>
+                <p className="tnum mt-1.5 text-[22px] font-bold text-brand">
+                  {boqValue > 0
+                    ? `${((summary.potentialSaving / boqValue) * 100).toFixed(1)}%`
+                    : "—"}
+                </p>
+              </div>
+            </div>
+
+            {/* Itemised savings */}
+            {overPricedLines.length > 0 && (
+              <CardContent className="pt-5">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Itemized Savings (Over-priced Items)
+                </p>
+                <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+                  {overPricedLines.map((line) => {
+                    const vendorTotal    = line.amount;
+                    const mktTotal       = line.variance.benchmarkRate * line.quantity;
+                    const saving         = vendorTotal - mktTotal;
+                    return (
+                      <div key={line.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                        <p className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                          {line.description}
+                        </p>
+                        <div className="flex shrink-0 items-center gap-2 text-[12.5px]">
+                          <span className="tnum text-muted-foreground">
+                            {formatINR(vendorTotal, { compact: true, decimals: 0 })}
+                          </span>
+                          <ArrowDown className="h-3 w-3 shrink-0 text-brand" />
+                          <span className="tnum text-muted-foreground">
+                            {formatINR(mktTotal, { compact: true, decimals: 0 })}
+                          </span>
+                          <span className="tnum ml-2 font-semibold text-brand">
+                            {formatINR(saving, { compact: true, decimals: 0 })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── 3. Risk Impact ── */}
+      <div className="mt-6">
+        {/* Section header */}
+        <div className="mb-4 flex items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+            <ShieldAlert className="h-4 w-4" />
+          </div>
+          <h3 className="text-[15px] font-semibold text-foreground">3. Risk Impact</h3>
+        </div>
+
+        <Card className="overflow-hidden">
+          {/* Warning banner — shown only when errors pushed the risk level up */}
+          {riskElevated && (
+            <div className="flex items-start gap-3 border-b border-over/20 bg-over-soft/40 px-5 py-3">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-over" />
+              <p className="text-[12.5px] leading-relaxed text-over">
+                Risk elevated from <strong>{riskBaseLevel}</strong> to{" "}
+                <strong>{riskAdjusted}</strong> due to {auditErrors.length} calculation error
+                {auditErrors.length === 1 ? "" : "s"} ({_highSevErrors} high severity)
+              </p>
+            </div>
+          )}
+
+          <CardContent className="pt-6">
+            {/* Score + risk level row */}
+            <div className="mb-7 flex flex-wrap items-center gap-6">
+              {/* Circular score badge */}
+              <div className={cn(
+                "flex h-[76px] w-[76px] shrink-0 flex-col items-center justify-center rounded-full border-4",
+                riskAuditScore >= 75
+                  ? "border-par/50 bg-par-soft/20"
+                  : riskAuditScore >= 55
+                    ? "border-warning/50 bg-warning-soft/20"
+                    : "border-over/50 bg-over-soft/20",
+              )}>
+                <span className="tnum text-[28px] font-bold leading-none text-foreground">
+                  {riskAuditScore}
+                </span>
+                <span className="text-[9.5px] text-muted-foreground">/ 100</span>
+              </div>
+
+              {/* Labels */}
+              <div className="flex flex-wrap gap-8">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Audit Score
+                  </p>
+                  <p className="mt-1 text-[15px] font-bold text-foreground">
+                    {riskAuditScore} / 100
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Base Risk Level
+                  </p>
+                  <p className="mt-1 text-[15px] font-bold text-foreground">{riskBaseLevel}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Adjusted Risk Level
+                  </p>
+                  <p className={cn(
+                    "mt-1 text-[15px] font-bold",
+                    riskAdjusted === "Critical" || riskAdjusted === "High"
+                      ? "text-over"
+                      : riskAdjusted === "Moderate"
+                        ? "text-warning"
+                        : "text-par",
+                  )}>
+                    {riskAdjusted}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-score progress bars */}
+            <div className="space-y-3.5">
+              {riskSubScores.map(({ label, score, max }) => {
+                const pct     = max > 0 ? (score / max) * 100 : 0;
+                const barCls  = pct >= 75 ? "bg-par" : pct >= 40 ? "bg-warning" : "bg-over";
+                return (
+                  <div key={label} className="flex items-center gap-4">
+                    <p className="w-36 shrink-0 text-[12.5px] text-muted-foreground">{label}</p>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                      <div
+                        className={cn("h-full rounded-full transition-all duration-500", barCls)}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="tnum w-14 shrink-0 text-right text-[12.5px] font-medium text-foreground">
+                      {score} / {max}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Review banner */}
       {lowConfidence.length > 0 && (
