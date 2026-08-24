@@ -21,6 +21,7 @@ import {
   PiggyBank,
   ShieldAlert,
   Store,
+  TriangleAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonStyles } from "@/components/ui/button";
@@ -37,6 +38,15 @@ const NOW = new Date("2026-08-14T10:00:00+05:30");
 const LOW_CONFIDENCE = 0.8;
 
 type FilterKey = "all" | VarianceFlag | "unmatched";
+
+interface AuditError {
+  severity: "High" | "Medium";
+  type: string;
+  context: string;
+  description: string;
+  expected: number;
+  actual: number;
+}
 
 export function InvoiceReport({
   invoice,
@@ -64,6 +74,67 @@ export function InvoiceReport({
   const summary = useMemo(() => summarise(analysed), [analysed]);
   const netValue = useMemo(() => items.reduce((sum, i) => sum + i.amount, 0), [items]);
   const corrections = items.filter((i) => i.corrected).length;
+
+  /** Detect arithmetic discrepancies between the document's own figures. */
+  const auditErrors = useMemo<AuditError[]>(() => {
+    const errors: AuditError[] = [];
+    const TOLERANCE = 2; // ₹2 rounding tolerance
+
+    // 1. Line-item errors: qty × rate ≠ printed amount
+    for (const line of analysed) {
+      if (line.printedAmount !== undefined) {
+        errors.push({
+          severity: "Medium",
+          type: "Line Item Calculation Error",
+          context: `Item #${line.srNo}: ${line.description}`,
+          description: "Quoted line total does not match Quantity × Unit Price",
+          expected: line.amount,          // qty × rate (our calc)
+          actual:   line.printedAmount,   // what the vendor printed
+        });
+      }
+    }
+
+    // 2. Subtotal mismatch: sum of lines ≠ vendor's quoted subtotal
+    if (invoice.subtotal > 0 && Math.abs(netValue - invoice.subtotal) > TOLERANCE) {
+      errors.push({
+        severity: "High",
+        type: "Subtotal Mismatch",
+        context: "Pricing Summary",
+        description: "Quoted subtotal does not match the sum of all line items",
+        expected: netValue,
+        actual:   invoice.subtotal,
+      });
+    }
+
+    // 3. Tax calculation error: printed tax ≠ subtotal × rate
+    const impliedTax  = invoice.total - invoice.subtotal;
+    const expectedTax = invoice.subtotal * (invoice.taxPct / 100);
+    if (invoice.subtotal > 0 && Math.abs(expectedTax - impliedTax) > TOLERANCE) {
+      errors.push({
+        severity: "Medium",
+        type: "Tax Calculation Error",
+        context: "Pricing Summary",
+        description: "Quoted tax does not match the inferred tax rate applied to the corrected taxable amount",
+        expected: expectedTax,
+        actual:   impliedTax,
+      });
+    }
+
+    // 4. Grand total mismatch: subtotal + tax ≠ quoted total
+    const expectedTotal = invoice.subtotal + expectedTax;
+    if (invoice.total > 0 && Math.abs(expectedTotal - invoice.total) > TOLERANCE) {
+      errors.push({
+        severity: "High",
+        type: "Grand Total Mismatch",
+        context: "Pricing Summary",
+        description: "Quoted grand total does not match the corrected calculation (Subtotal + Tax − Discount)",
+        expected: expectedTotal,
+        actual:   invoice.total,
+      });
+    }
+
+    return errors;
+  }, [analysed, netValue, invoice.subtotal, invoice.total, invoice.taxPct]);
 
   const visible = analysed.filter((line) => {
     if (filter === "all") return true;
@@ -347,6 +418,83 @@ export function InvoiceReport({
           )}
         </CardContent>
       </Card>
+
+      {/* ── Calculation Errors ── */}
+      {auditErrors.length > 0 && (
+        <div className="mt-6">
+          {/* Section heading */}
+          <div className="mb-4 flex items-center gap-2.5">
+            <TriangleAlert className="h-[18px] w-[18px] text-warning" />
+            <h3 className="text-[15px] font-semibold text-foreground">
+              1. Calculation Errors Found
+            </h3>
+            <span className="rounded-full bg-over-soft/80 px-2.5 py-0.5 text-[12px] font-semibold text-over">
+              {auditErrors.length} error{auditErrors.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {auditErrors.map((err, idx) => {
+              const diff = err.actual - err.expected;
+              const diffPositive = diff > 0;
+              return (
+                <div
+                  key={idx}
+                  className="overflow-hidden rounded-xl border border-border bg-surface shadow-card"
+                >
+                  {/* Error header */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 pt-4 pb-3">
+                    <span
+                      className={cn(
+                        "rounded px-2 py-0.5 text-[12px] font-semibold",
+                        err.severity === "High"
+                          ? "bg-over-soft/70 text-over"
+                          : "bg-warning-soft/80 text-warning",
+                      )}
+                    >
+                      {err.severity}
+                    </span>
+                    <span className="text-[13.5px] font-semibold text-foreground">
+                      {err.type}
+                    </span>
+                    <span className="text-[13px] text-muted-foreground">{err.context}</span>
+                  </div>
+
+                  {/* Description */}
+                  <p className="px-5 pb-4 text-[13.5px] text-foreground">{err.description}</p>
+
+                  {/* Expected / Actual / Difference boxes */}
+                  <div className="grid grid-cols-3 divide-x divide-border border-t border-border">
+                    <div className="px-5 py-3.5">
+                      <p className="text-[11.5px] text-muted-foreground">Expected</p>
+                      <p className="tnum mt-1 text-[15px] font-semibold text-brand">
+                        {formatINR(err.expected, { compact: true })}
+                      </p>
+                    </div>
+                    <div className="px-5 py-3.5">
+                      <p className="text-[11.5px] text-muted-foreground">Actual</p>
+                      <p className="tnum mt-1 text-[15px] font-semibold text-foreground">
+                        {formatINR(err.actual, { compact: true })}
+                      </p>
+                    </div>
+                    <div className="px-5 py-3.5">
+                      <p className="text-[11.5px] text-muted-foreground">Difference</p>
+                      <p
+                        className={cn(
+                          "tnum mt-1 text-[15px] font-semibold",
+                          diff === 0 ? "text-muted-foreground" : "text-over",
+                        )}
+                      >
+                        {diff === 0 ? "₹0" : `${diffPositive ? "+" : ""}${formatINR(diff, { compact: true })}`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Review banner */}
       {lowConfidence.length > 0 && (
