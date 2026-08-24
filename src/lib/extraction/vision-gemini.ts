@@ -14,17 +14,17 @@ import {
  *
  * Model choice is not a preference here, it is what the key can reach. The
  * Gemini free tier grants no quota at all on the Pro models — they answer 429
- * with a FreeTier quota of None — so the flash tier is the working path, and
- * `gemini-flash-latest` is used rather than a pinned version so it follows
- * Google's current flash release instead of rotting when one is retired.
+ * with a FreeTier quota of None — so the flash-lite tier is the working path.
+ * `gemini-flash-lite-latest` is confirmed to support responseSchema (JSON mode)
+ * and responds reliably. The -latest suffix follows Google's current release
+ * instead of pinning a version that will one day be retired.
  *
- * Flash reads a clean printed page accurately, which is what a scanned bill is.
- * It is a smaller model than Pro, so the same confidence ceiling as the Claude
- * path applies and every row is still checked against its own arithmetic
- * downstream.
+ * Flash-Lite reads a clean printed page accurately, which is what a scanned
+ * bill is. Every extracted row is still checked against its own arithmetic
+ * downstream regardless of the model used here.
  */
 
-const MODEL = "gemini-flash-latest";
+const MODEL = "gemini-flash-lite-latest";
 
 /**
  * Gemini takes its own schema dialect — uppercase type names, no

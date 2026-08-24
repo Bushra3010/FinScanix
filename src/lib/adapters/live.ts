@@ -385,10 +385,11 @@ export const geminiAssistant: AssistantAdapter = {
     try {
       const response = await withGeminiRetry(() =>
         ai.models.generateContent({
-        // The free tier has no quota on the Pro models, so flash is the working
-        // path. `-latest` follows Google's current flash rather than pinning a
-        // version that will one day be retired.
-        model: "gemini-flash-latest",
+        // The free tier has no quota on the Pro models. gemini-flash-lite-latest
+        // is confirmed to respond reliably and is the working path. The -latest
+        // suffix follows Google's current release rather than pinning a version
+        // that will one day be retired.
+        model: "gemini-flash-lite-latest",
         contents: [
           ...history.slice(-8).map((message) => ({
             role: message.role === "assistant" ? ("model" as const) : ("user" as const),
