@@ -18,6 +18,8 @@ import {
   Minus,
   Pencil,
   LoaderCircle,
+  PiggyBank,
+  ShieldAlert,
   Store,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -807,7 +809,142 @@ export function InvoiceReport({
           </div>
         )}
       </Card>
+
+      {/* ── Final Audit Summary ── */}
+      <FinalAuditSummary summary={summary} currency={invoice.city?.currency ?? "INR"} />
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Final Audit Summary card
+ * ------------------------------------------------------------------ */
+
+function FinalAuditSummary({
+  summary,
+  currency,
+}: {
+  summary: ReturnType<typeof summarise>;
+  currency: string;
+}) {
+  const totalMatched = summary.overCount + summary.underCount + summary.parCount;
+
+  /* Overall risk level */
+  type RiskLevel = "High" | "Medium" | "Low";
+  let riskLevel: RiskLevel;
+  if (summary.overCount >= 3 || summary.variancePct > 15) riskLevel = "High";
+  else if (summary.overCount >= 1 || summary.variancePct > 5) riskLevel = "Medium";
+  else riskLevel = "Low";
+
+  const riskStyle: Record<RiskLevel, string> = {
+    High:   "bg-over-soft/70 text-over",
+    Medium: "bg-warning-soft/70 text-warning",
+    Low:    "bg-par-soft/70 text-par",
+  };
+  const riskDot: Record<RiskLevel, string> = {
+    High: "bg-over", Medium: "bg-warning", Low: "bg-par",
+  };
+
+  /* Audit verdict text */
+  let verdict: string;
+  if (summary.overCount === 0 && summary.underCount === 0) {
+    verdict = "All benchmarked items are within the acceptable market range. This quotation appears fairly priced — standard approval recommended.";
+  } else if (summary.overCount === 0) {
+    verdict = `All ${totalMatched} benchmarked items are at or below market rates. This is a competitive quotation — approval recommended.`;
+  } else if (summary.overCount >= 3 || summary.variancePct > 15) {
+    verdict = `${summary.overCount} item${summary.overCount === 1 ? " is" : "s are"} significantly over-priced compared to current market rates. Negotiation strongly recommended before approval.`;
+  } else {
+    verdict = `${summary.overCount} item${summary.overCount === 1 ? " is" : "s are"} above market benchmark. Minor negotiation may recover savings before approval.`;
+  }
+
+  /* Potential savings copy */
+  const savingsCopy =
+    summary.potentialSaving <= 0
+      ? "Quotation is at or below market rates"
+      : `Recoverable by repricing ${summary.overCount} over-priced item${summary.overCount === 1 ? "" : "s"} to benchmark`;
+
+  const rows: { label: string; value: string | number; colour: string }[] = [
+    {
+      label: "Overall Risk Level",
+      value: riskLevel,
+      colour: "",        /* handled separately as badge */
+    },
+    { label: "Over-priced Items",   value: summary.overCount,   colour: "text-over" },
+    { label: "Under-priced Items",  value: summary.underCount,  colour: "text-brand" },
+    { label: "At Par Items",        value: summary.parCount,    colour: "text-par" },
+  ];
+
+  return (
+    <Card className="mt-6 overflow-hidden">
+      {/* Card header */}
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-over-soft/60 text-over">
+            <ShieldAlert className="h-4 w-4" />
+          </div>
+          <div>
+            <CardTitle>Final Audit Summary</CardTitle>
+            <CardDescription>Overall risk assessment &amp; recommendations</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+
+      {/* Body: left list + right panels */}
+      <CardContent className="p-0">
+        <div className="flex flex-col divide-y divide-border sm:flex-row sm:divide-x sm:divide-y-0">
+
+          {/* Left: risk metrics list */}
+          <div className="flex-1 divide-y divide-border">
+            {rows.map((row, i) => (
+              <div key={row.label} className="flex items-center justify-between px-5 py-4">
+                <span className="text-[13.5px] text-foreground">{row.label}</span>
+                {i === 0 ? (
+                  /* Risk Level badge */
+                  <span className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-[12.5px] font-semibold",
+                    riskStyle[riskLevel],
+                  )}>
+                    <span className={cn("h-2 w-2 rounded-full", riskDot[riskLevel])} />
+                    {riskLevel}
+                  </span>
+                ) : (
+                  <span className={cn("tnum text-[22px] font-bold", row.colour)}>
+                    {row.value}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Right: savings + verdict stacked */}
+          <div className="flex w-full flex-col divide-y divide-border sm:max-w-[340px]">
+            {/* Potential Savings */}
+            <div className="px-5 py-4">
+              <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-foreground">
+                <PiggyBank className="h-4 w-4 text-brand" />
+                Potential Savings
+              </div>
+              <p className="tnum text-[28px] font-bold text-foreground">
+                {summary.potentialSaving > 0
+                  ? formatINR(summary.potentialSaving, { compact: true, decimals: 0 })
+                  : "₹0"}
+              </p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+                {savingsCopy}
+              </p>
+            </div>
+
+            {/* Audit Verdict */}
+            <div className="px-5 py-4">
+              <p className="mb-1.5 text-[13.5px] font-semibold text-foreground">
+                Audit Verdict
+              </p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">{verdict}</p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
