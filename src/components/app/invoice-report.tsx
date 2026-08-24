@@ -22,6 +22,8 @@ import {
   Pencil,
   LoaderCircle,
   PiggyBank,
+  RefreshCw,
+  Save,
   ShieldAlert,
   Store,
   TriangleAlert,
@@ -501,6 +503,49 @@ export function InvoiceReport({
       scopeRiskScore,
     };
   }, [analysed]);
+
+  /* ── Final (bottom) Recommended Actions — document-specific ── */
+  const finalRecommendations = useMemo<string[]>(() => {
+    const recs: string[] = [];
+    const descs = analysed.map((l) => l.description.toLowerCase());
+
+    // RCC / structural specs
+    if (descs.some((d) => d.includes("rcc") || d.includes("concrete") || d.includes("reinforce")))
+      recs.push("Verify exact RCC and reinforcement specifications with structural drawings.");
+
+    // Branded equivalent / approved make ambiguity
+    const brandedLine = analysed.find((l) =>
+      ["branded", "equivalent", "approved make", "similar"].some((k) => l.description.toLowerCase().includes(k)),
+    );
+    if (brandedLine) {
+      const dl = brandedLine.description.toLowerCase();
+      const type = dl.includes("pump") || dl.includes("filter") ? "pump and filter" : "equipment";
+      recs.push(`Request clarification on 'branded equivalent' ${type} makes.`);
+    } else if (sowAnalysis.ambiguities.some((a) => a.toLowerCase().includes("branded"))) {
+      recs.push("Request clarification on 'branded equivalent' equipment specifications.");
+    }
+
+    // Arithmetic errors in BOQ
+    if (auditErrors.length > 0)
+      recs.push("Correct the mathematical discrepancies in the BOQ tables.");
+
+    // Missing soil testing
+    if (sowAnalysis.missingItems.some((m) => m.toLowerCase().includes("soil")))
+      recs.push("Request a site-specific survey to finalise dimensions and soil conditions.");
+
+    // Over-priced negotiation
+    if (summary.overCount > 0)
+      recs.push(`Renegotiate pricing on ${summary.overCount} over-priced line item${summary.overCount === 1 ? "" : "s"} using the attached market benchmarks.`);
+
+    // Unmatched items
+    if (summary.unmatchedCount > 0)
+      recs.push(`Obtain rate justification from the vendor for ${summary.unmatchedCount} unmatched item${summary.unmatchedCount === 1 ? "" : "s"} before approving.`);
+
+    if (recs.length === 0)
+      recs.push("All figures verified — approve quotation subject to standard commercial terms.");
+
+    return recs.slice(0, 5);
+  }, [analysed, sowAnalysis, auditErrors, summary]);
 
   return (
     <>
@@ -1905,6 +1950,57 @@ export function InvoiceReport({
           </div>
         );
       })()}
+
+      {/* ── Recommended Actions ── */}
+      <Card className="mt-6">
+        <CardContent className="pt-5">
+          <h3 className="mb-4 text-[15px] font-semibold text-foreground">Recommended Actions</h3>
+          <ol className="space-y-3">
+            {finalRecommendations.map((rec, idx) => (
+              <li key={idx} className="flex items-start gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[12px] font-bold text-brand">
+                  {idx + 1}
+                </span>
+                <p className="text-[13.5px] leading-relaxed text-foreground">{rec}</p>
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
+
+      {/* ── Bottom action bar ── */}
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.print()}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download PDF
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => window.print()}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Generate Report
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => {/* saved state toast could go here */}}
+        >
+          <Save className="h-3.5 w-3.5" />
+          Save Report
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => { window.location.href = "/app/invoices/new"; }}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Audit Another
+        </Button>
+      </div>
     </>
   );
 }
