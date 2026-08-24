@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveLineCorrectionAction, setInvoiceCityAction } from "@/lib/invoices/actions";
 import {
+  AlignLeft,
   ArrowDown,
   ArrowRightLeft,
   ArrowUp,
@@ -376,6 +377,22 @@ export function InvoiceReport({
       ambiguities.push("Responsibility for temporary water and electricity supply");
     }
 
+    // Common items a vendor intentionally excludes from scope
+    const STANDARD_EXCLUSIONS = [
+      "Rock excavation",
+      "Dewatering",
+      "Landscaping",
+      "Fencing",
+      "Lighting",
+      "Permanent power supply",
+      "Furniture and loose fittings",
+      "Civil works for utility connections",
+    ];
+    const exclusions = STANDARD_EXCLUSIONS.filter((item) => {
+      const key = item.toLowerCase().split(" ")[0];
+      return !descs.some((d) => d.includes(key));
+    }).slice(0, 7);
+
     const issueCount = missingItems.length + Math.min(ambiguities.length, 3);
     const maxIssues = STANDARD_CHECKLIST.length + 3;
     const scopeRiskScore = Math.max(10, Math.round(100 - (issueCount / maxIssues) * 100));
@@ -384,6 +401,7 @@ export function InvoiceReport({
       extractedScope: extractedScope.length > 0 ? extractedScope : ["General civil works"],
       missingItems,
       ambiguities: ambiguities.slice(0, 4),
+      exclusions,
       scopeRiskScore,
     };
   }, [analysed]);
@@ -1428,30 +1446,50 @@ export function InvoiceReport({
         </div>
 
         <CardContent className="pt-5">
-          <div className="grid gap-6 sm:grid-cols-2">
-            {/* Extracted Scope */}
-            <div>
-              <div className="mb-3 flex items-center gap-2">
-                <ListChecks className="h-4 w-4 text-muted-foreground" />
-                <p className="text-[13px] font-semibold text-foreground">Extracted Scope</p>
+          <div className="grid gap-8 sm:grid-cols-2">
+
+            {/* ── LEFT: Extracted Scope + Exclusions ── */}
+            <div className="space-y-6">
+              {/* Extracted Scope */}
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <AlignLeft className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-[13.5px] font-semibold text-foreground">Extracted Scope</p>
+                </div>
+                <ul className="space-y-2">
+                  {sowAnalysis.extractedScope.map((item) => (
+                    <li key={item} className="flex items-center gap-2.5 text-[13px] text-foreground">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-par" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="space-y-2">
-                {sowAnalysis.extractedScope.map((item) => (
-                  <li key={item} className="flex items-center gap-2.5 text-[13px] text-foreground">
-                    <Check className="h-3.5 w-3.5 shrink-0 text-par" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
+
+              {/* Exclusions */}
+              {sowAnalysis.exclusions.length > 0 && (
+                <div>
+                  <p className="mb-3 text-[13.5px] font-semibold text-foreground">Exclusions</p>
+                  <ul className="space-y-2">
+                    {sowAnalysis.exclusions.map((item) => (
+                      <li key={item} className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
-            {/* Missing Items + Ambiguities */}
+            {/* ── RIGHT: Missing Items + Ambiguities + Scope Risk Score ── */}
             <div className="space-y-5">
+              {/* Missing Items */}
               {sowAnalysis.missingItems.length > 0 && (
                 <div>
                   <div className="mb-3 flex items-center gap-2">
                     <TriangleAlert className="h-4 w-4 text-warning" />
-                    <p className="text-[13px] font-semibold text-foreground">Missing Items</p>
+                    <p className="text-[13.5px] font-semibold text-foreground">Missing Items</p>
                   </div>
                   <ul className="space-y-2">
                     {sowAnalysis.missingItems.map((item) => (
@@ -1464,9 +1502,10 @@ export function InvoiceReport({
                 </div>
               )}
 
+              {/* Ambiguities */}
               {sowAnalysis.ambiguities.length > 0 && (
                 <div>
-                  <p className="mb-3 text-[13px] font-semibold text-foreground">Ambiguities</p>
+                  <p className="mb-3 text-[13.5px] font-semibold text-foreground">Ambiguities</p>
                   <ul className="space-y-2">
                     {sowAnalysis.ambiguities.map((item) => (
                       <li key={item} className="flex items-start gap-2.5 text-[13px] text-foreground">
@@ -1477,18 +1516,22 @@ export function InvoiceReport({
                   </ul>
                 </div>
               )}
-            </div>
-          </div>
 
-          {/* Scope Risk Score */}
-          <div className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface-sunken px-5 py-3.5">
-            <p className="text-[13.5px] font-medium text-foreground">Scope Risk Score</p>
-            <p className={cn(
-              "tnum text-[18px] font-bold",
-              sowAnalysis.scopeRiskScore >= 75 ? "text-par" : sowAnalysis.scopeRiskScore >= 50 ? "text-warning" : "text-over",
-            )}>
-              {sowAnalysis.scopeRiskScore} / 100
-            </p>
+              {/* Scope Risk Score */}
+              <div className="flex items-center justify-between rounded-xl border border-border bg-surface-sunken px-4 py-3">
+                <p className="text-[13px] font-medium text-foreground">Scope Risk Score</p>
+                <p className={cn(
+                  "tnum text-[18px] font-bold",
+                  sowAnalysis.scopeRiskScore >= 75
+                    ? "text-par"
+                    : sowAnalysis.scopeRiskScore >= 50
+                      ? "text-warning"
+                      : "text-over",
+                )}>
+                  {sowAnalysis.scopeRiskScore} / 100
+                </p>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
