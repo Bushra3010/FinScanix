@@ -1700,100 +1700,211 @@ export function InvoiceReport({
       )}
 
       {/* ── Pricing Details + Potential Savings (2-col) ── */}
-      <div className="mt-6 grid gap-5 sm:grid-cols-2">
+      {(() => {
+        const calcTax           = netValue * (invoice.taxPct / 100);
+        const calcGrandTotal    = netValue + calcTax;          // boqValue
+        const discount          = Math.max(0, invoice.subtotal - netValue);
+        const subtotalDiff      = invoice.subtotal - netValue; // +ve = vendor quoted more
+        const grandTotalDiff    = invoice.total - calcGrandTotal;
+        const TOLS              = 2;
+        const subtotalOk        = invoice.subtotal <= 0 || Math.abs(subtotalDiff) <= TOLS;
+        const grandOk           = invoice.total    <= 0 || Math.abs(grandTotalDiff) <= TOLS;
 
-        {/* Pricing Details & Calculations */}
-        <Card>
-          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
-              <FileText className="h-4 w-4" />
-            </div>
-            <div>
-              <h3 className="text-[14px] font-semibold text-foreground">Pricing Details &amp; Calculations</h3>
-              <p className="text-[12px] text-muted-foreground">Mathematical accuracy verification</p>
-            </div>
-          </div>
-          <CardContent className="pt-4">
-            {[
-              { label: "Quoted subtotal",     value: invoice.subtotal > 0 ? invoice.subtotal : null },
-              { label: "Calculated subtotal", value: netValue },
-              { label: "Discount",            value: Math.max(0, invoice.subtotal - netValue) },
-              { label: "Tax",                 value: netValue * (invoice.taxPct / 100) },
-              { label: "Quoted grand total",  value: invoice.total > 0 ? invoice.total : null },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
-                <p className="text-[13px] text-muted-foreground">{label}</p>
-                <p className="tnum text-[13px] font-medium text-foreground">
-                  {value !== null && value !== undefined
-                    ? formatINR(value, { compact: true, decimals: 0 })
-                    : "—"}
-                </p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        // Note text from audit context
+        const lineErrCount = auditErrors.filter((e) => e.type === "Line Item Calculation Error").length;
+        const pricingNote =
+          lineErrCount > 0 && !subtotalOk
+            ? `Mathematical errors identified in ${lineErrCount} line item${lineErrCount === 1 ? "" : "s"} and the subtotal sum, leading to a discrepancy between quoted and calculated totals.`
+            : !subtotalOk || !grandOk
+              ? "A discrepancy was detected between the vendor's quoted figures and the figures derived from the line-item data."
+              : "All figures verified — quoted totals match the calculated values within rounding tolerance.";
 
-        {/* Potential Savings (compact) */}
-        <Card>
-          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
-              <PiggyBank className="h-4 w-4" />
-            </div>
-            <h3 className="text-[14px] font-semibold text-foreground">Potential Savings</h3>
-          </div>
-          <CardContent className="pt-4">
-            {/* Current / Benchmark / Saving strip */}
-            <div className="mb-4 grid grid-cols-3 gap-2">
-              <div>
-                <p className="text-[11px] text-muted-foreground">Current</p>
-                <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
-                  {formatINR(netValue, { compact: true, decimals: 0 })}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-muted-foreground">Benchmark</p>
-                <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
-                  {summary.benchmarkTotal > 0
-                    ? formatINR(summary.benchmarkTotal, { compact: true, decimals: 0 })
-                    : "—"}
-                </p>
-              </div>
-              <div className="rounded-lg bg-brand-soft/50 px-2.5 py-1.5">
-                <p className="text-[11px] text-brand">Saving</p>
-                <p className="tnum mt-0.5 text-[16px] font-bold text-brand">
-                  {summary.potentialSaving > 0
-                    ? formatINR(summary.potentialSaving, { compact: true, decimals: 0 })
-                    : "—"}
-                </p>
-              </div>
-            </div>
+        // Per-category savings (group over-priced lines)
+        const SAVINGS_CATS: { label: string; kw: string[] }[] = [
+          { label: "Civil works optimization",   kw: ["rcc", "concrete", "excavat", "civil", "brick", "block", "shutt", "back fill", "sand fill"] },
+          { label: "Pool works optimization",    kw: ["pool", "swimming", "spa", "jacuzzi"] },
+          { label: "Plumbing optimization",      kw: ["plumb", "pipe", "drain", "cpvc", "upvc", "fitting", "valve"] },
+          { label: "Filtration optimization",    kw: ["filter", "filtration", "pump", "skimmer", "uv", "dosing"] },
+          { label: "Electrical optimization",    kw: ["electric", "cable", "wiring", "conduit"] },
+          { label: "Flooring & finishes",        kw: ["tile", "tiles", "flooring", "marble", "ceramic", "vitrified"] },
+        ];
+        type SavingsCat = { label: string; saving: number };
+        const catSavings: SavingsCat[] = [];
+        const usedIds = new Set<string>();
+        for (const cat of SAVINGS_CATS) {
+          const matches = overPricedLines.filter(
+            (l) => !usedIds.has(l.id) && cat.kw.some((k) => l.description.toLowerCase().includes(k)),
+          );
+          if (matches.length === 0) continue;
+          const saving = matches.reduce((s, l) => s + (l.amount - l.variance.benchmarkRate * l.quantity), 0);
+          matches.forEach((l) => usedIds.add(l.id));
+          catSavings.push({ label: cat.label, saving });
+        }
+        // Remaining uncategorised
+        const uncategorised = overPricedLines.filter((l) => !usedIds.has(l.id));
+        if (uncategorised.length > 0) {
+          const saving = uncategorised.reduce((s, l) => s + (l.amount - l.variance.benchmarkRate * l.quantity), 0);
+          catSavings.push({ label: "General optimization", saving });
+        }
 
-            <p className="mb-3 text-[11.5px] text-muted-foreground">
-              Estimated potential savings — not guaranteed.
-            </p>
+        return (
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
 
-            {/* Per-item savings */}
-            <div className="space-y-1.5">
-              {overPricedLines.slice(0, 5).map((line) => {
-                const saving = line.amount - line.variance.benchmarkRate * line.quantity;
-                return (
-                  <div key={line.id} className="flex items-baseline justify-between gap-2">
-                    <p className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
-                      {line.description}
+            {/* ── Pricing Details & Calculations ── */}
+            <Card>
+              <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-sunken text-muted-foreground">
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-[14px] font-semibold text-foreground">Pricing Details &amp; Calculations</h3>
+                  <p className="text-[12px] text-muted-foreground">Mathematical accuracy verification</p>
+                </div>
+              </div>
+
+              <CardContent className="pt-4">
+                {/* Main rows */}
+                {[
+                  { label: "Quoted subtotal",      value: invoice.subtotal > 0 ? invoice.subtotal : null, bold: false },
+                  { label: "Calculated subtotal",  value: netValue,                                        bold: false },
+                  { label: "Discount",             value: discount,                                        bold: false },
+                  { label: "Tax",                  value: calcTax,                                         bold: false },
+                  { label: "Quoted grand total",   value: invoice.total > 0 ? invoice.total : null,        bold: true  },
+                  { label: "Calculated grand total", value: calcGrandTotal,                                bold: true  },
+                ].map(({ label, value, bold }) => (
+                  <div key={label} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
+                    <p className={cn("text-[13px]", bold ? "font-semibold text-foreground" : "text-muted-foreground")}>
+                      {label}
                     </p>
-                    <p className="tnum shrink-0 text-[12.5px] font-semibold text-brand">
-                      {formatINR(saving, { compact: true, decimals: 0 })}
+                    <p className={cn("tnum text-[13px]", bold ? "font-bold text-foreground" : "font-medium text-foreground")}>
+                      {value !== null && value !== undefined
+                        ? formatINR(value, { compact: true, decimals: 0 })
+                        : "—"}
                     </p>
                   </div>
-                );
-              })}
-              {overPricedLines.length === 0 && (
-                <p className="text-[12.5px] text-muted-foreground">No over-priced items identified.</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                ))}
+
+                {/* Discrepancy badge */}
+                {!grandOk && invoice.total > 0 && (
+                  <div className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-over/30 bg-over-soft/40 px-3 py-1.5 text-[12.5px] font-semibold text-over">
+                    <TriangleAlert className="h-3.5 w-3.5" />
+                    Discrepancy: {formatINR(grandTotalDiff, { compact: true, decimals: 0 })}
+                  </div>
+                )}
+
+                {/* SUBTOTAL CHECK */}
+                {invoice.subtotal > 0 && (
+                  <div className="mt-5">
+                    <p className="mb-2 text-[10.5px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Subtotal Check
+                    </p>
+                    {[
+                      { label: "Expected", value: formatINR(netValue, { compact: true, decimals: 0 }) },
+                      { label: "Quoted",   value: formatINR(invoice.subtotal, { compact: true, decimals: 0 }) },
+                      { label: "Status",   value: subtotalOk ? "Verified" : "Discrepancy", isStatus: true, ok: subtotalOk },
+                    ].map(({ label, value, isStatus, ok }) => (
+                      <div key={label} className="flex items-baseline justify-between py-1">
+                        <p className="text-[12.5px] text-muted-foreground">{label}</p>
+                        <p className={cn(
+                          "tnum text-[12.5px] font-medium",
+                          isStatus ? (ok ? "text-par" : "text-over") : "text-foreground",
+                        )}>
+                          {value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* GRAND TOTAL CHECK */}
+                {invoice.total > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-[10.5px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Grand Total Check
+                    </p>
+                    {[
+                      { label: "Expected", value: formatINR(calcGrandTotal, { compact: true, decimals: 0 }) },
+                      { label: "Quoted",   value: formatINR(invoice.total, { compact: true, decimals: 0 }) },
+                      { label: "Status",   value: grandOk ? "Verified" : "Discrepancy", isStatus: true, ok: grandOk },
+                    ].map(({ label, value, isStatus, ok }) => (
+                      <div key={label} className="flex items-baseline justify-between py-1">
+                        <p className="text-[12.5px] text-muted-foreground">{label}</p>
+                        <p className={cn(
+                          "tnum text-[12.5px] font-medium",
+                          isStatus ? (ok ? "text-par" : "text-over") : "text-foreground",
+                        )}>
+                          {value}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Explanatory note */}
+                <p className="mt-4 text-[12px] leading-relaxed text-muted-foreground">
+                  {pricingNote}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* ── Potential Savings (compact) ── */}
+            <Card>
+              <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
+                  <PiggyBank className="h-4 w-4" />
+                </div>
+                <h3 className="text-[14px] font-semibold text-foreground">Potential Savings</h3>
+              </div>
+              <CardContent className="pt-4">
+                {/* Current / Benchmark / Saving strip */}
+                <div className="mb-4 grid grid-cols-3 divide-x divide-border overflow-hidden rounded-xl border border-border">
+                  <div className="px-4 py-3">
+                    <p className="text-[11px] text-muted-foreground">Current</p>
+                    <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
+                      {formatINR(netValue, { compact: true, decimals: 0 })}
+                    </p>
+                  </div>
+                  <div className="px-4 py-3">
+                    <p className="text-[11px] text-muted-foreground">Benchmark</p>
+                    <p className="tnum mt-0.5 text-[16px] font-bold text-foreground">
+                      {summary.benchmarkTotal > 0
+                        ? formatINR(summary.benchmarkTotal, { compact: true, decimals: 0 })
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="bg-brand-soft/40 px-4 py-3">
+                    <p className="text-[11px] font-medium text-brand">Saving</p>
+                    <p className="tnum mt-0.5 text-[16px] font-bold text-brand">
+                      {summary.potentialSaving > 0
+                        ? formatINR(summary.potentialSaving, { compact: true, decimals: 0 })
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mb-3 text-[12px] text-muted-foreground">
+                  Estimated potential savings — not guaranteed.
+                </p>
+
+                {/* Per-category savings */}
+                <div className="space-y-2">
+                  {catSavings.map(({ label, saving }) => (
+                    <div key={label} className="flex items-baseline justify-between gap-2 border-b border-border pb-2 last:border-0">
+                      <p className="text-[13px] text-foreground">{label}</p>
+                      <p className="tnum shrink-0 text-[13px] font-semibold text-brand">
+                        {formatINR(saving, { compact: true, decimals: 0 })}
+                      </p>
+                    </div>
+                  ))}
+                  {catSavings.length === 0 && (
+                    <p className="text-[12.5px] text-muted-foreground">No over-priced items identified.</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
     </>
   );
 }
