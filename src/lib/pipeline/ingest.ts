@@ -141,7 +141,7 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     label: "Text layer",
     passed: hasTextLayer,
     detail: hasTextLayer
-      ? "Embedded text recovered directly — no OCR required"
+      ? "Embedded text recovered directly"
       : "No text layer; the page is an image and needs OCR",
   });
 
@@ -164,28 +164,65 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
     };
   }
 
-  // Scans, photographs, and PDFs with no text layer go to the vision model.
-  if (!hasTextLayer) {
+  // Vision extraction path:
+  //   • Always used for scans and image files (no text layer).
+  //   • Also used for text-layer PDFs when a vision model is available.
+  //     The text-layer parser reconstructs rows from coordinate-based glyph
+  //     positions, which breaks on PDFs whose content streams are written
+  //     column-by-column instead of row-by-row — a common artefact of Word
+  //     and Sheets exporters. The vision model reads the rendered page and
+  //     is unaffected by content-stream ordering, so it reliably captures
+  //     every row even in complex multi-line-cell tables.
+  //     The text-layer result is still kept for metadata (vendor, GSTIN,
+  //     document number, page count) since those fields parse cleanly from
+  //     unstructured text regardless of table layout.
+  const useVision = !hasTextLayer || (isPdf && ocrAvailable());
+  if (useVision) {
     try {
-      // `original`, not input.bytes: for a scanned PDF the text-layer attempt
-      // above has already run, and it leaves input.bytes detached.
-      extracted = await extractFromImage(original, input.mimeType);
+      const visionResult = await extractFromImage(original, input.mimeType);
       checks.push({
         id: "ocr",
-        label: "OCR extraction",
+        label: "Vision extraction",
         passed: true,
-        detail: `Read by the vision model — ${extracted.lines.length} rows recovered`,
+        detail: `Read by the vision model — ${visionResult.lines.length} rows recovered`,
       });
+      // For text-layer PDFs, merge: prefer the vision model's line items
+      // (more reliable on complex tables) but keep text-layer metadata when
+      // richer (vendor name, GSTIN, document number parsed from free text).
+      if (hasTextLayer && extracted) {
+        extracted = {
+          ...visionResult,
+          vendor: visionResult.vendor || extracted.vendor,
+          vendorGstin: visionResult.vendorGstin || extracted.vendorGstin,
+          documentNumber: visionResult.documentNumber || extracted.documentNumber,
+          taxPct: visionResult.taxPct || extracted.taxPct,
+          pageCount: extracted.pageCount,
+          language: extracted.language,
+        };
+      } else {
+        extracted = visionResult;
+      }
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "OCR failed";
-      checks.push({ id: "ocr", label: "OCR extraction", passed: false, detail });
-      return {
-        ok: false,
-        rejection: {
-          reason: `This document needed OCR and it did not succeed: ${detail}`,
-          checks,
-        },
-      };
+      // For text-layer PDFs the text extraction is a valid fallback —
+      // a failed vision call is a degraded result, not a rejection.
+      if (!hasTextLayer) {
+        const detail = error instanceof Error ? error.message : "OCR failed";
+        checks.push({ id: "ocr", label: "Vision extraction", passed: false, detail });
+        return {
+          ok: false,
+          rejection: {
+            reason: `This document needed OCR and it did not succeed: ${detail}`,
+            checks,
+          },
+        };
+      }
+      // hasTextLayer=true: log the failure and continue with text-layer result.
+      checks.push({
+        id: "ocr",
+        label: "Vision extraction",
+        passed: false,
+        detail: `Vision model unavailable — falling back to text layer. ${error instanceof Error ? error.message : ""}`,
+      });
     }
   }
 
