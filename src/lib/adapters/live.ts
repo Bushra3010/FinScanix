@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getCityAny } from "@/lib/data/cities";
 import { answerInDomain, classifyDomain, OUT_OF_DOMAIN_REPLY } from "@/lib/assistant";
 import { getTier } from "@/lib/data/org";
+import { geminiClient, withGeminiRetry } from "@/lib/ai/gemini";
 import type { MarketPlatform, MarketQuote } from "@/lib/types";
 import type { AssistantAdapter, PaymentAdapter, PricingSearchAdapter } from "./types";
 
@@ -271,6 +272,90 @@ async function serviceWebSearch(options: {
   }));
 }
 
+/**
+ * Gemini-based market rate estimator.
+ *
+ * Serper shopping search reliably prices commodities but fails badly on two
+ * common cases:
+ *   1. Service items (job/ls) — returns component prices (₹340) instead of
+ *      labour/contract rates (₹25,000+).
+ *   2. Specialised equipment — finds cheap lookalike products instead of the
+ *      correct grade (₹58K for a 2000 CFM HRU vs the real ₹2.5L market price).
+ *
+ * Gemini understands the full description, unit, and city context and returns
+ * realistic 2024-2026 Indian HVAC/MEP/FM rates — the same approach that makes
+ * Base44's pricing accurate. Serper shopping remains a fallback for when the
+ * Gemini key is not configured.
+ */
+async function geminiPricingEstimate(options: {
+  description: string;
+  unit: string;
+  cityName: string;
+  limit: number;
+  fetchedAt: string;
+  cityId: string;
+  currency: string;
+}): Promise<MarketQuote[]> {
+  const { description, unit, cityName, limit, fetchedAt, cityId, currency } = options;
+
+  if (!process.env.GOOGLE_AI_API_KEY) return [];
+
+  const prompt = `You are a construction and facilities-management cost database for India (2024-2026 market rates).
+
+Provide the current market rate for this line item from a vendor quotation:
+
+Description: "${description}"
+Unit of measure: ${unit}
+City: ${cityName}, India
+
+Return ONLY valid JSON with this exact shape — no prose, no markdown:
+{"low": <20th-percentile rate in ${currency}>, "mid": <median rate in ${currency}>, "high": <80th-percentile rate in ${currency}>}
+
+Rules:
+- For supply items (Nos, each): give the typical wholesale/dealer price for the exact specification described.
+- For service items (Job, LS, lot): give the total contract price for a single complete job including labour, tools, and overheads.
+- Base rates on real Indian HVAC / MEP / FM market data for ${cityName}.
+- Return plain integers or decimals only (no currency symbols, no commas).`;
+
+  try {
+    const ai = geminiClient();
+    const result = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model: "gemini-flash-lite-latest",
+        contents: [{ role: "user" as const, parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" },
+      }),
+    );
+
+    const text = result.text ?? "";
+    if (!text.trim()) return [];
+
+    const parsed = JSON.parse(text) as { low?: number; mid?: number; high?: number };
+    const { low, mid, high } = parsed;
+    if (!mid || mid <= 0) return [];
+
+    const prices = [low, mid, high]
+      .filter((p): p is number => typeof p === "number" && p > 0)
+      .map(Math.round);
+
+    return prices.slice(0, limit).map((price, i) => ({
+      id: `gemini-price-${cityId}-${i}-${fetchedAt}`,
+      seller: "AI Market Estimate",
+      platform: "Web search" as MarketPlatform,
+      price,
+      unit,
+      location: cityName,
+      url: "",
+      fetchedAt,
+      inStock: true,
+      currency,
+      vatPct: null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export const serperPricingSearch: PricingSearchAdapter = {
   id: "pricing",
   provider: "Serper",
@@ -289,43 +374,66 @@ export const serperPricingSearch: PricingSearchAdapter = {
     const location = cityConfig?.location ?? `${cityName}, India`;
     const minPrice = minPriceFor(unit);
     const fetchedAt = new Date().toISOString();
+    const currency = city?.currency ?? "INR";
 
-    // Trim to the most distinctive keywords for a focused search.
+    // ── Primary: Gemini AI rate estimation ─────────────────────────────────
+    //
+    // Gemini understands the full item description and returns realistic
+    // Indian HVAC/MEP/FM market rates for both supply and service items.
+    // This is far more accurate than shopping search (which finds cheap
+    // components instead of the correct unit or service contract rate).
+    //
+    // Serper shopping is kept as a fallback for when GOOGLE_AI_API_KEY is
+    // absent, and as a cross-check for GCC markets.
+    if (process.env.GOOGLE_AI_API_KEY) {
+      try {
+        const geminiQuotes = await geminiPricingEstimate({
+          description,
+          unit,
+          cityName,
+          limit,
+          fetchedAt,
+          cityId,
+          currency,
+        });
+        if (geminiQuotes.length > 0) return geminiQuotes;
+      } catch {
+        // fall through to Serper
+      }
+    }
+
+    // ── Fallback: Serper shopping (products only) ───────────────────────────
+    //
+    // Used when Gemini is not available. Service items are routed to web
+    // search — shopping search returns component prices for them.
+    if (isServiceItem(description, unit)) {
+      // Trim to most distinctive keywords.
+      const query = description
+        .replace(/[^a-zA-Z0-9 ]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 3)
+        .slice(0, 8)
+        .join(" ");
+      const webQuotes = await serviceWebSearch({
+        query, cityName, gl, location, limit, apiKey, cityId, unit, fetchedAt,
+      });
+      return webQuotes.map((q) => ({ ...q, currency, vatPct: city?.vatPct ?? null }));
+    }
+
+    // Product items: shopping search.
     const query = description
       .replace(/[^a-zA-Z0-9 ]/g, " ")
       .split(/\s+/)
-      .filter((word) => word.length > 3)
+      .filter((w) => w.length > 3)
       .slice(0, 8)
       .join(" ");
-
-    // Service items (installation, dismantling, commissioning, etc.) return
-    // component or tool prices from shopping search — wildly wrong. Route them
-    // to a web search with construction-rate context instead.
-    if (isServiceItem(description, unit)) {
-      const quotes = await serviceWebSearch({
-        query, cityName, gl, location, limit, apiKey, cityId, unit, fetchedAt,
-      });
-      return quotes.map((q) => ({
-        ...q,
-        currency: city?.currency ?? "INR",
-        vatPct: city?.vatPct ?? null,
-      }));
-    }
-
-    // Product items: shopping search, with GCC wholesale suffix.
     const suffix = isGcc ? " supplier wholesale" : "";
     const num = Math.max(limit * 3, 10);
 
     const response = await fetch("https://google.serper.dev/shopping", {
       method: "POST",
       headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        q: `${query}${suffix}`,
-        gl,
-        hl: "en",
-        location,
-        num,
-      }),
+      body: JSON.stringify({ q: `${query}${suffix}`, gl, hl: "en", location, num }),
       signal: AbortSignal.timeout(12_000),
     });
 
@@ -340,8 +448,6 @@ export const serperPricingSearch: PricingSearchAdapter = {
     let quotes = (payload.shopping ?? [])
       .map((item, index) => {
         const price = parsePrice(item.price);
-        // Drop prices that are implausibly low for this unit type — they are
-        // almost always wrong product matches (a component instead of the unit).
         if (price === null || price < minPrice) return null;
         return {
           id: `serper-${cityId}-${index}-${fetchedAt}`,
@@ -358,22 +464,12 @@ export const serperPricingSearch: PricingSearchAdapter = {
       .filter((q): q is NonNullable<typeof q> => q !== null)
       .slice(0, limit);
 
-    // WebSearch fallback for GCC markets where Serper shopping coverage is thin.
     if (isGcc && quotes.length < limit) {
-      const webQuotes = await webSearchFallback({
-        description,
-        unit,
-        cityId,
-        limit: limit - quotes.length,
-      });
-      quotes = [...quotes, ...webQuotes];
+      const webQ = await webSearchFallback({ description, unit, cityId, limit: limit - quotes.length });
+      quotes = [...quotes, ...webQ];
     }
 
-    return quotes.map((q) => ({
-      ...q,
-      currency: city?.currency ?? "INR",
-      vatPct: city?.vatPct ?? null,
-    }));
+    return quotes.map((q) => ({ ...q, currency, vatPct: city?.vatPct ?? null }));
   },
 };
 
