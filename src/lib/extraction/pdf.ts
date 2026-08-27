@@ -73,6 +73,11 @@ export interface ExtractionResult {
    * guessed at.
    */
   sampleText: string;
+  /**
+   * Items the vendor explicitly stated as excluded from scope, read from the
+   * document's Exclusions / Terms section. Undefined when no such section was found.
+   */
+  exclusions?: string[];
 }
 
 /** Units seen in Indian construction and FM billing. */

@@ -58,9 +58,14 @@ const EXTRACTION_SCHEMA = {
         propertyOrdering: ["description", "unit", "quantity", "rate", "amount", "legible"],
       },
     },
+    exclusions: {
+      type: Type.ARRAY,
+      description: "Items the vendor explicitly stated as NOT included — from an Exclusions, Scope Exclusions, Not Included, or Terms section. Empty array if no exclusions are stated.",
+      items: { type: Type.STRING },
+    },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines"],
+  required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines", "exclusions"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines", "exclusions"],
 };
 
 export function geminiConfigured() {

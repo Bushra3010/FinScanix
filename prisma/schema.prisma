@@ -178,6 +178,8 @@ model Invoice {
   extractionNote String?
   /// Script(s) detected in the text layer.
   language       String?
+  /// Vendor-stated exclusions parsed from the document's terms / notes section.
+  exclusions     Json?
 
   // Quality gate outcome — FR-1.2
   qualityPassed   Boolean

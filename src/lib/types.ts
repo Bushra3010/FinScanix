@@ -196,6 +196,8 @@ export interface Invoice {
   extractionNote?: string;
   /** Script(s) detected while reading the document. */
   language?: string;
+  /** Items the vendor explicitly excluded from scope, parsed from the document. */
+  exclusions?: string[];
   quality: QualityReport;
   subtotal: number;
   taxPct: number;

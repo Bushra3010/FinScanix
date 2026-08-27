@@ -327,6 +327,9 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       qualityScore: score,
       extractionNote: [extracted?.note, ...locationNotes].filter(Boolean).join(" ") || null,
       language: extracted?.language ?? null,
+      exclusions: extracted?.exclusions && extracted.exclusions.length > 0
+        ? extracted.exclusions
+        : undefined,
       qualityChecks: {
         create: checks.map((check, position) => ({
           key: check.id,

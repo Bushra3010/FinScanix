@@ -433,36 +433,13 @@ export function InvoiceReport({
   const sowAnalysis = useMemo(() => {
     const descs = analysed.map((l) => l.description.toLowerCase());
 
-    const SCOPE_CATS: { name: string; kw: string[] }[] = [
-      { name: "Site setup",              kw: ["site", "mobilisation", "hoarding", "temporary"] },
-      { name: "Excavation",              kw: ["excavat", "earthwork", "earth work", "fill", "grading"] },
-      { name: "RCC / Civil structure",   kw: ["rcc", "concrete", "reinforce", "shuttering", "column", "beam", "slab", "foundation", "brick", "block"] },
-      { name: "Waterproofing",           kw: ["waterproof", "damp", "moisture"] },
-      { name: "Flooring & Tiles",        kw: ["tile", "tiles", "flooring", "marble", "granite", "vitrified", "ceramic"] },
-      { name: "Pool & Water Features",   kw: ["pool", "swimming", "spa", "jacuzzi", "fountain"] },
-      { name: "Plumbing & Drainage",     kw: ["plumb", "pipe", "drain", "water supply", "sewage", "cpvc", "upvc", "fitting"] },
-      { name: "Filtration & Treatment",  kw: ["filter", "filtration", "sand filter", "media", "uv", "chlorin", "dosing", "skimmer"] },
-      { name: "Electrical",              kw: ["electric", "wiring", "cable", "conduit", "switch", "panel", "mcb", "light"] },
-      { name: "Testing / Commissioning", kw: ["test", "commission", "trial", "handover"] },
-      { name: "Finishing Works",         kw: ["paint", "plaster", "putty", "primer", "false ceiling", "partition", "gypsum"] },
-    ];
+    // Extracted scope = the actual line item descriptions from the document.
+    // Each line item IS a scope item; displaying them directly is far more
+    // accurate than mapping through a hardcoded category list that only covers
+    // civil/pool works and misses HVAC, MEP, FM and other trades.
+    const extractedScope = analysed.map((l) => l.description.trim());
 
-    const extractedScope = SCOPE_CATS
-      .filter(({ kw }) => kw.some((k) => descs.some((d) => d.includes(k))))
-      .map((c) => c.name);
-
-    const STANDARD_CHECKLIST = [
-      "Soil testing report cost",
-      "Statutory approval fees",
-      "Architectural design fees",
-      "Insurance and performance bond",
-      "Temporary utilities (power / water)",
-    ];
-    const missingItems = STANDARD_CHECKLIST.filter((item) => {
-      const key = item.toLowerCase().split(" ")[0];
-      return !descs.some((d) => d.includes(key));
-    });
-
+    // Ambiguities: lines containing vague specification language
     const AMBIG_KW = ["branded", "equivalent", "similar", "approved make", "as per specification"];
     const ambiguities: string[] = [];
     for (const line of analysed) {
@@ -472,37 +449,37 @@ export function InvoiceReport({
       }
     }
     if (!descs.some((d) => d.includes("temporary") && (d.includes("water") || d.includes("electric")))) {
-      ambiguities.push("Responsibility for temporary water and electricity supply");
+      ambiguities.push("Responsibility for temporary water and electricity supply during works");
     }
 
-    // Common items a vendor intentionally excludes from scope
-    const STANDARD_EXCLUSIONS = [
-      "Rock excavation",
-      "Dewatering",
-      "Landscaping",
-      "Fencing",
-      "Lighting",
-      "Permanent power supply",
-      "Furniture and loose fittings",
-      "Civil works for utility connections",
+    // Missing items: a lightweight checklist of items that are often forgotten
+    const STANDARD_CHECKLIST = [
+      "Statutory approval fees",
+      "Insurance and performance bond",
+      "Temporary utilities (power / water)",
     ];
-    const exclusions = STANDARD_EXCLUSIONS.filter((item) => {
+    const missingItems = STANDARD_CHECKLIST.filter((item) => {
       const key = item.toLowerCase().split(" ")[0];
       return !descs.some((d) => d.includes(key));
-    }).slice(0, 7);
+    });
+
+    // Exclusions: use what the vision model read from the document's
+    // Exclusions / Terms section. Fall back to an empty list — never show
+    // a hardcoded list that doesn't match the actual document.
+    const exclusions = invoice.exclusions ?? [];
 
     const issueCount = missingItems.length + Math.min(ambiguities.length, 3);
     const maxIssues = STANDARD_CHECKLIST.length + 3;
     const scopeRiskScore = Math.max(10, Math.round(100 - (issueCount / maxIssues) * 100));
 
     return {
-      extractedScope: extractedScope.length > 0 ? extractedScope : ["General civil works"],
+      extractedScope: extractedScope.length > 0 ? extractedScope : ["(no line items found)"],
       missingItems,
       ambiguities: ambiguities.slice(0, 4),
       exclusions,
       scopeRiskScore,
     };
-  }, [analysed]);
+  }, [analysed, invoice.exclusions]);
 
   /* ── Final (bottom) Recommended Actions — document-specific ── */
   const finalRecommendations = useMemo<string[]>(() => {

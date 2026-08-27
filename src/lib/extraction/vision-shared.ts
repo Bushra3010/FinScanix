@@ -15,7 +15,9 @@ Transcribe only what is printed. Never infer a rate, quantity or amount that you
 
 Exclude subtotal, tax, discount, round-off and grand-total rows: they are not line items. Keep the vendor's own wording for each description verbatim, since it is matched against a rate book downstream.
 
-Amounts are in Indian rupees. Report rate and amount as plain numbers with no currency symbol or thousands separator.`;
+Amounts are in Indian rupees. Report rate and amount as plain numbers with no currency symbol or thousands separator.
+
+For "exclusions": look for any "Exclusions", "Scope Exclusions", "Not included", or "Terms" section in the document. Return each exclusion as a short plain-text string. If none are stated, return an empty array.`;
 
 export const OCR_USER_PROMPT =
   "Extract every billed line item from this document, along with the vendor, GSTIN, document number and GST rate.";
@@ -35,6 +37,7 @@ export interface VisionPayload {
   documentNumber: string;
   taxPct: number;
   lines: VisionLine[];
+  exclusions: string[];
 }
 
 export const IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -72,6 +75,10 @@ export function toExtractionResult(payload: VisionPayload, provider: string): Ex
       };
     });
 
+  const exclusions = Array.isArray(payload.exclusions)
+    ? payload.exclusions.map((e) => String(e).trim()).filter(Boolean)
+    : [];
+
   return {
     lines,
     pageCount: 1,
@@ -80,6 +87,7 @@ export function toExtractionResult(payload: VisionPayload, provider: string): Ex
     documentNumber: payload.documentNumber?.trim() || undefined,
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
+    exclusions: exclusions.length > 0 ? exclusions : undefined,
     // The vision path reads the page as an image, so there is no text layer to
     // sample a script from; the model is prompted in English.
     language: "English",
