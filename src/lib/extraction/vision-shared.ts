@@ -17,6 +17,8 @@ Exclude subtotal, tax, discount, round-off and grand-total rows: they are not li
 
 Amounts are in Indian rupees. Report rate and amount as plain numbers with no currency symbol or thousands separator.
 
+For "documentTitle": look for a project or work title printed prominently on the document (e.g. "HRU Replacement Project", "Swimming Pool Construction — Phase 2"). This is typically a heading line separate from the vendor name and invoice number. Return an empty string if absent.
+
 For "exclusions": look for any "Exclusions", "Scope Exclusions", "Not included", or "Terms" section in the document. Return each exclusion as a short plain-text string. If none are stated, return an empty array.`;
 
 export const OCR_USER_PROMPT =
@@ -35,6 +37,7 @@ export interface VisionPayload {
   vendor: string;
   vendorGstin: string;
   documentNumber: string;
+  documentTitle: string;
   taxPct: number;
   lines: VisionLine[];
   exclusions: string[];
@@ -85,6 +88,7 @@ export function toExtractionResult(payload: VisionPayload, provider: string): Ex
     vendor: payload.vendor?.trim() || undefined,
     vendorGstin: payload.vendorGstin?.trim() || undefined,
     documentNumber: payload.documentNumber?.trim() || undefined,
+    documentTitle: payload.documentTitle?.trim() || undefined,
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
     exclusions: exclusions.length > 0 ? exclusions : undefined,

@@ -56,6 +56,11 @@ export interface ExtractionResult {
   vendor?: string;
   vendorGstin?: string;
   documentNumber?: string;
+  /**
+   * The document's own heading / project title, e.g. "HRU Replacement Project".
+   * Used as the project name when the user didn't supply one at upload time.
+   */
+  documentTitle?: string;
   taxPct: number;
   /** True when the file carried no usable text layer — needs OCR instead. */
   needsOcr: boolean;

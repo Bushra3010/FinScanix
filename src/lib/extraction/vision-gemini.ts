@@ -37,6 +37,7 @@ const EXTRACTION_SCHEMA = {
     vendor: { type: Type.STRING, description: "Supplier name as printed on the document" },
     vendorGstin: { type: Type.STRING, description: "15-character GSTIN, or empty string if absent" },
     documentNumber: { type: Type.STRING, description: "Invoice or quotation number" },
+    documentTitle: { type: Type.STRING, description: "The project or work title printed on the document, e.g. 'HRU Replacement Project', 'Swimming Pool Construction'. Empty string if absent." },
     taxPct: { type: Type.NUMBER, description: "GST percentage applied, e.g. 18" },
     lines: {
       type: Type.ARRAY,
@@ -64,8 +65,8 @@ const EXTRACTION_SCHEMA = {
       items: { type: Type.STRING },
     },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines", "exclusions"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines", "exclusions"],
+  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions"],
 };
 
 export function geminiConfigured() {

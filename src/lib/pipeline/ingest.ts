@@ -315,7 +315,13 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       documentType: input.documentType,
       vendor: extracted?.vendor ?? "Unidentified vendor",
       vendorGstin: extracted?.vendorGstin ?? "—",
-      project: input.project,
+      // If the user left the project field blank ("Unassigned"), use the
+      // document's own heading extracted by the vision model (e.g. "HRU
+      // Replacement Project"). This way the report title matches what is
+      // printed on the quotation or invoice.
+      project: (input.project && input.project !== "Unassigned")
+        ? input.project
+        : (extracted?.documentTitle || input.project),
       cityId,
       uploadedById: input.userId,
       status: "extracting",
