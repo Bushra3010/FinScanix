@@ -244,12 +244,6 @@ export function InvoiceReport({
     "Below Market":"border-par/40 bg-par-soft/60 text-par",
   };
 
-  const summaryText =
-    classLabel === "Competitive"
-      ? `The quoted rates are generally aligned with current ${invoice.city.name} market benchmarks for the specified works.`
-      : classLabel === "Above Market"
-        ? `The quoted rates exceed current ${invoice.city.name} market benchmarks by ${summary.variancePct.toFixed(1)}%. Potential savings of ${formatINR(summary.potentialSaving, { compact: true, decimals: 0 })} are identifiable through renegotiation.`
-        : `The quoted rates are below current ${invoice.city.name} market benchmarks — this quotation appears competitive.`;
 
   const benchmarkSource = `Internal ${invoice.city.name} Cost Indices`;
 
@@ -287,6 +281,47 @@ export function InvoiceReport({
   const overPricedLines = analysed.filter(
     (l) => l.variance.flag === "over" && l.variance.benchmarkBasis !== "none",
   );
+
+  // Rich executive summary — location, mathematical accuracy, audit score, savings.
+  // Placed after riskAuditScore since it references that value.
+  const summaryText = useMemo(() => {
+    const location   = invoice.city.name;
+    const docType    = invoice.documentType === "quotation" ? "quotation" : "invoice";
+    const calcErrors = auditErrors.filter((e) => e.type === "arithmetic").length;
+    const overCount  = summary.overCount;
+    const savingPct  = boqValue > 0 ? (summary.potentialSaving / boqValue) * 100 : 0;
+
+    // Sentence 1 — mathematical accuracy
+    const accuracyClause =
+      calcErrors === 0
+        ? "reflects high mathematical accuracy with zero calculation errors and a balanced grand total"
+        : `contains ${calcErrors} arithmetic discrepanc${calcErrors === 1 ? "y" : "ies"} that require correction`;
+    const sentence1 = `The audit of the ${location}-based ${docType} ${accuracyClause}.`;
+
+    // Sentence 2 — audit score + risk / savings
+    let sentence2: string;
+    if (overCount > 0 && summary.potentialSaving > 0) {
+      sentence2 =
+        `However, the audit score of ${riskAuditScore}/100 is impacted by ` +
+        `${overCount === 1 ? "one" : overCount} high-risk, over-priced ` +
+        `item${overCount === 1 ? "" : "s"}, representing a potential cost-saving opportunity of ` +
+        `${formatINR(summary.potentialSaving, { compact: true, decimals: 0 })} or ` +
+        `${savingPct.toFixed(1)}% of the total expenditure.`;
+    } else if (classLabel === "Below Market") {
+      sentence2 =
+        `The audit score of ${riskAuditScore}/100 reflects competitive pricing — ` +
+        `quoted rates are below current ${location} market benchmarks.`;
+    } else {
+      sentence2 =
+        `The audit score of ${riskAuditScore}/100 is within an acceptable range ` +
+        `with no significantly over-priced items detected.`;
+    }
+
+    return `${sentence1} ${sentence2}`;
+  }, [
+    invoice.city.name, invoice.documentType, auditErrors,
+    summary, boqValue, riskAuditScore, classLabel,
+  ]);
 
   const lineClassLabel: Record<string, string> = {
     over:   "Above Market",
@@ -604,9 +639,20 @@ export function InvoiceReport({
           </div>
         </div>
 
-        {/* Classification + text + table */}
+        {/* Executive Summary + Classification + table */}
         <CardContent className="pt-5">
-          <div className="mb-3 flex items-center gap-2.5">
+          {/* Executive Summary block */}
+          <div className="mb-5 rounded-lg border border-border bg-surface-sunken/40 px-5 py-4">
+            <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-foreground">
+              <AlignLeft className="h-3.5 w-3.5 text-muted-foreground" />
+              Executive Summary
+            </div>
+            <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+              {summaryText}
+            </p>
+          </div>
+
+          <div className="mb-5 flex items-center gap-2.5">
             <span className="text-[13.5px] text-muted-foreground">Overall classification:</span>
             <span
               className={cn(
@@ -617,10 +663,6 @@ export function InvoiceReport({
               {classLabel}
             </span>
           </div>
-
-          <p className="mb-5 text-[13.5px] leading-relaxed text-muted-foreground">
-            {summaryText}
-          </p>
 
           {/* Simplified market comparison table */}
           {matchedLines.length > 0 && (
