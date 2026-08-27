@@ -148,6 +148,129 @@ async function webSearchFallback(options: {
   }
 }
 
+/**
+ * Service-type line items: units and description keywords that identify labour,
+ * installation, civil, or FM work rather than a supply/product item.
+ *
+ * Shopping search reliably prices products but returns component or tool prices
+ * (₹200-800) for services — e.g. "Commissioning & BMS Integration" gets BMS
+ * sensor listings. For these we fall back to a web search with construction-
+ * rate context so the results reflect labour/contract rates, not goods prices.
+ */
+const SERVICE_UNITS = new Set(["job", "ls", "l.s", "lot", "lump", "lumpsum", "lump sum", "visit", "trip"]);
+const SERVICE_KEYWORDS =
+  /\b(install|erect|dismantl|remov|commission|decommission|test|balanc|integrat|repair|replac|servic|mainten|labour|labor|manpower|civil|plumb|weld|paint|prime|fabricat|align|calibrat|handl|transport|hauling|scaffold|formwork|shuttering|curing|water.proof|waterproof)\b/i;
+
+/**
+ * Minimum credible price (INR) per unit type.
+ * Quotes below this threshold are almost certainly wrong product matches.
+ */
+const UNIT_MIN_PRICE: Record<string, number> = {
+  job: 2_000,
+  ls: 2_000,
+  "l.s": 2_000,
+  lot: 2_000,
+  visit: 500,
+  trip: 500,
+  nos: 50,
+  default: 20,
+};
+
+function minPriceFor(unit: string): number {
+  const key = unit.toLowerCase().trim();
+  return UNIT_MIN_PRICE[key] ?? UNIT_MIN_PRICE.default;
+}
+
+function isServiceItem(description: string, unit: string): boolean {
+  return SERVICE_UNITS.has(unit.toLowerCase().trim()) || SERVICE_KEYWORDS.test(description);
+}
+
+/**
+ * Web-search path for service/labour line items.
+ *
+ * Sends a Serper general-web query with construction-rate context terms so
+ * the results page reflects contract rates, not e-commerce product listings.
+ * Prices are parsed from snippets using a loose INR pattern.
+ */
+async function serviceWebSearch(options: {
+  query: string;
+  cityName: string;
+  gl: string;
+  location: string;
+  limit: number;
+  apiKey: string;
+  cityId: string;
+  unit: string;
+  fetchedAt: string;
+}): Promise<MarketQuote[]> {
+  const { query, cityName, gl, location, limit, apiKey, cityId, unit, fetchedAt } = options;
+  const minPrice = minPriceFor(unit);
+
+  const response = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      q: `"${query}" rate cost India construction HVAC site`,
+      gl,
+      hl: "en",
+      location,
+      num: limit * 4,
+    }),
+    signal: AbortSignal.timeout(12_000),
+  });
+
+  if (!response.ok) return [];
+
+  const payload = (await response.json()) as {
+    organic?: { title?: string; link?: string; snippet?: string }[];
+    answerBox?: { answer?: string; snippet?: string };
+  };
+
+  const candidates: number[] = [];
+
+  // Try answer box first (Google often surfaces a direct rate answer).
+  const boxText = payload.answerBox?.answer ?? payload.answerBox?.snippet ?? "";
+  const boxMatch = boxText.match(/(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)/i);
+  if (boxMatch) {
+    const v = parsePrice(boxMatch[1]);
+    if (v !== null && v >= minPrice) candidates.push(v);
+  }
+
+  for (const item of payload.organic ?? []) {
+    const snippet = item.snippet ?? "";
+    // Match any INR price token in the snippet.
+    const matches = [...snippet.matchAll(/(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)/gi)];
+    for (const m of matches) {
+      const v = parsePrice(m[1]);
+      if (v !== null && v >= minPrice) candidates.push(v);
+    }
+  }
+
+  if (candidates.length === 0) return [];
+
+  // Sort and de-dupe; take a spread around the median to produce limit quotes.
+  candidates.sort((a, b) => a - b);
+  const mid = Math.floor(candidates.length / 2);
+  const spread = candidates.slice(
+    Math.max(0, mid - Math.floor(limit / 2)),
+    mid + Math.ceil(limit / 2) + 1,
+  );
+
+  return spread.slice(0, limit).map((price, i) => ({
+    id: `web-svc-${cityId}-${i}-${fetchedAt}`,
+    seller: "Web search (construction rates)",
+    platform: "Web search" as MarketQuote["platform"],
+    price,
+    unit,
+    location: cityName,
+    url: "",
+    fetchedAt,
+    inStock: true,
+    currency: "INR",
+    vatPct: null,
+  }));
+}
+
 export const serperPricingSearch: PricingSearchAdapter = {
   id: "pricing",
   provider: "Serper",
@@ -160,9 +283,14 @@ export const serperPricingSearch: PricingSearchAdapter = {
 
     const city = getCityAny(cityId);
     const isGcc = city?.region === "gcc";
+    const cityName = city?.name ?? "";
+    const cityConfig = isGcc ? GCC_SERPER_CONFIG[cityId] : undefined;
+    const gl = cityConfig?.gl ?? "in";
+    const location = cityConfig?.location ?? `${cityName}, India`;
+    const minPrice = minPriceFor(unit);
+    const fetchedAt = new Date().toISOString();
 
-    // Trim to the distinctive words: a full 200-character SoR description is a
-    // worse search query than the handful of terms that identify the product.
+    // Trim to the most distinctive keywords for a focused search.
     const query = description
       .replace(/[^a-zA-Z0-9 ]/g, " ")
       .split(/\s+/)
@@ -170,12 +298,22 @@ export const serperPricingSearch: PricingSearchAdapter = {
       .slice(0, 8)
       .join(" ");
 
-    // GCC queries add "supplier wholesale" to find B2B listings; India queries
-    // stay as-is.
+    // Service items (installation, dismantling, commissioning, etc.) return
+    // component or tool prices from shopping search — wildly wrong. Route them
+    // to a web search with construction-rate context instead.
+    if (isServiceItem(description, unit)) {
+      const quotes = await serviceWebSearch({
+        query, cityName, gl, location, limit, apiKey, cityId, unit, fetchedAt,
+      });
+      return quotes.map((q) => ({
+        ...q,
+        currency: city?.currency ?? "INR",
+        vatPct: city?.vatPct ?? null,
+      }));
+    }
+
+    // Product items: shopping search, with GCC wholesale suffix.
     const suffix = isGcc ? " supplier wholesale" : "";
-    const cityConfig = isGcc ? GCC_SERPER_CONFIG[cityId] : undefined;
-    const gl = cityConfig?.gl ?? "in";
-    const location = cityConfig?.location ?? `${city?.name ?? ""}, India`;
     const num = Math.max(limit * 3, 10);
 
     const response = await fetch("https://google.serper.dev/shopping", {
@@ -195,20 +333,23 @@ export const serperPricingSearch: PricingSearchAdapter = {
       throw new Error(`Serper returned ${response.status}: ${await response.text()}`);
     }
 
-    const payload = (await response.json()) as { shopping?: { title?: string; source?: string; link?: string; price?: string; delivery?: string }[] };
-    const fetchedAt = new Date().toISOString();
+    const payload = (await response.json()) as {
+      shopping?: { title?: string; source?: string; link?: string; price?: string; delivery?: string }[];
+    };
 
     let quotes = (payload.shopping ?? [])
       .map((item, index) => {
         const price = parsePrice(item.price);
-        if (price === null) return null;
+        // Drop prices that are implausibly low for this unit type — they are
+        // almost always wrong product matches (a component instead of the unit).
+        if (price === null || price < minPrice) return null;
         return {
           id: `serper-${cityId}-${index}-${fetchedAt}`,
           seller: item.source?.trim() || item.title?.slice(0, 40) || "Listed seller",
           platform: platformFor(item.link, isGcc) as MarketQuote["platform"],
           price,
           unit,
-          location: city?.name ?? "",
+          location: cityName,
           url: item.link ?? "",
           fetchedAt,
           inStock: !/out of stock/i.test(item.delivery ?? ""),
