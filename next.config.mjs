@@ -1,3 +1,5 @@
+const isProduction = process.env.NODE_ENV === "production";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -43,16 +45,26 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-          // Tell browsers and Railway's edge to cache static assets aggressively.
-          // Next.js content-hashes these so the header is safe.
         ],
       },
       {
+        // Tell browsers and Railway's edge to cache static assets aggressively.
+        // A production build content-hashes every chunk filename, so a new build
+        // is a new URL and "immutable" is safe.
+        //
+        // Development is the opposite: chunks are served at stable unhashed
+        // paths (/_next/static/chunks/webpack.js), so the same header pins the
+        // first build's JavaScript in the browser for a year. Every rebuild then
+        // leaves the page running old code against a new server — which surfaces
+        // as "Server Action … was not found on the server" on any form, since
+        // action ids are rebuilt while the cached bundle still sends the old one.
         source: "/_next/static/(.*)",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
+            value: isProduction
+              ? "public, max-age=31536000, immutable"
+              : "no-store, must-revalidate",
           },
         ],
       },
