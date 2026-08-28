@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db/client";
 import { requirePermission } from "@/lib/auth/guard";
 import { getTier } from "@/lib/data/org";
 import { ingestDocument } from "@/lib/pipeline/ingest";
+import { services } from "@/lib/adapters";
 import { removeDocumentPrefix, storageConfigured } from "@/lib/storage";
 import type { QualityCheck } from "@/lib/types";
 
@@ -207,6 +208,66 @@ export async function deleteInvoiceAction(formData: FormData) {
 }
 
 /**
+ * Re-reads market quotes for a set of lines against a city, replacing what was
+ * stored for the previous one.
+ *
+ * A line keeps its old quotes when the search returns nothing or fails: a stale
+ * benchmark is a weaker answer than a fresh one, but no benchmark at all is
+ * worse than either. Requests go out a few at a time, which keeps a ten-line
+ * document to a few seconds without tripping the provider's rate limit.
+ */
+async function refreshMarketQuotes(
+  lines: { id: string; description: string; unit: string }[],
+  cityId: string,
+): Promise<number> {
+  if (!services.pricing.live) return 0;
+
+  const BATCH = 4;
+  let replaced = 0;
+
+  for (let start = 0; start < lines.length; start += BATCH) {
+    const batch = lines.slice(start, start + BATCH);
+    await Promise.all(
+      batch.map(async (line) => {
+        try {
+          const quotes = await services.pricing.search({
+            description: line.description,
+            unit: line.unit,
+            cityId,
+            limit: 3,
+          });
+          if (quotes.length === 0) return;
+
+          await prisma.$transaction([
+            prisma.marketQuote.deleteMany({ where: { lineItemId: line.id } }),
+            prisma.marketQuote.createMany({
+              data: quotes.map((quote) => ({
+                lineItemId: line.id,
+                seller: quote.seller,
+                platform: quote.platform,
+                price: quote.price,
+                currency: quote.currency,
+                vatPct: quote.vatPct,
+                unit: quote.unit,
+                location: quote.location,
+                url: quote.url,
+                fetchedAt: new Date(quote.fetchedAt),
+                inStock: quote.inStock,
+              })),
+            }),
+          ]);
+          replaced += 1;
+        } catch (error) {
+          console.error("Re-quoting failed for line", line.id, error);
+        }
+      }),
+    );
+  }
+
+  return replaced;
+}
+
+/**
  * Re-prices a document against a different city — SoW section 3.
  *
  * The city index multiplies every benchmark rate, so changing it is not a label
@@ -248,13 +309,22 @@ export async function setInvoiceCityAction(formData: FormData) {
       ),
   ]);
 
+  // Re-index the rate book and stop there and the benchmark barely moves: the
+  // market quotes carry 40% of its weight (VARIANCE_CONFIG.marketWeight) and
+  // were fetched for the previous city, so Delhi and Bengaluru come out within
+  // a few percent of each other — and a line benchmarked on market quotes alone
+  // does not move at all. The quotes have to be re-read for the new city.
+  const refreshed = await refreshMarketQuotes(invoice.lineItems, cityId);
+
   await prisma.activityEvent.create({
     data: {
       organisationId: user.organisation.id,
       invoiceId: invoice.id,
       kind: "correction",
       actor: user.name,
-      message: `Re-priced ${invoice.number} against ${city.name} (index x${city.indexFactor.toFixed(2)})`,
+      message:
+        `Re-priced ${invoice.number} against ${city.name} (index x${city.indexFactor.toFixed(2)})` +
+        (refreshed > 0 ? `, ${refreshed} line${refreshed === 1 ? "" : "s"} re-quoted at market` : ""),
     },
   });
 

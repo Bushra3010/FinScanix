@@ -287,6 +287,52 @@ async function serviceWebSearch(options: {
  * Base44's pricing accurate. Serper shopping remains a fallback for when the
  * Gemini key is not configured.
  */
+
+interface BaselineRate {
+  low?: number;
+  mid?: number;
+  high?: number;
+}
+
+const BASELINE_TTL_MS = 86_400_000;
+const baselineCache = new Map<string, { at: number; rate: BaselineRate | null }>();
+
+/**
+ * The national baseline for one item, held for a day.
+ *
+ * Caching is not only about cost. The same item has to price the same way each
+ * time it is asked for, or the market half of the benchmark drifts between one
+ * view of a document and the next, and a city comparison measures model noise
+ * instead of the cities. Re-pricing one document across five cities is one call
+ * rather than five.
+ *
+ * Deliberately a plain map rather than unstable_cache: pricing also runs from
+ * the scheduled jobs, which have no request context, and unstable_cache throws
+ * there — a failure that would fall through to the shopping-search fallback and
+ * quietly price a 2000 CFM HRU at 58K.
+ */
+async function nationalBaseline(prompt: string, key: string): Promise<BaselineRate | null> {
+  const hit = baselineCache.get(key);
+  if (hit && Date.now() - hit.at < BASELINE_TTL_MS) return hit.rate;
+
+  const ai = geminiClient();
+  const result = await withGeminiRetry(() =>
+    ai.models.generateContent({
+      model: "gemini-flash-lite-latest",
+      contents: [{ role: "user" as const, parts: [{ text: prompt }] }],
+      // Sampling is what made the same item answer 2.5L on one call and 2.75L
+      // on the next; the rate asked for here is a reference figure, not a
+      // creative one.
+      config: { responseMimeType: "application/json", temperature: 0 },
+    }),
+  );
+
+  const text = result.text ?? "";
+  const rate = text.trim() ? (JSON.parse(text) as BaselineRate) : null;
+  baselineCache.set(key, { at: Date.now(), rate });
+  return rate;
+}
+
 async function geminiPricingEstimate(options: {
   description: string;
   unit: string;
@@ -300,13 +346,19 @@ async function geminiPricingEstimate(options: {
 
   if (!process.env.GOOGLE_AI_API_KEY) return [];
 
+  // The rate asked for is the national baseline, not the city rate. Asked per
+  // city, the model answers within a couple of percent for Delhi and Bengaluru
+  // and identically for service items — it simply is not that city-sensitive —
+  // which left the market side of the benchmark flat across locations while the
+  // rate book moved with its index. Taking a national figure and applying the
+  // same published index factor makes both halves move together, and makes the
+  // difference between two cities explainable from a number the report shows.
   const prompt = `You are a construction and facilities-management cost database for India (2024-2026 market rates).
 
-Provide the current market rate for this line item from a vendor quotation:
+Provide the current all-India baseline market rate for this line item from a vendor quotation:
 
 Description: "${description}"
 Unit of measure: ${unit}
-City: ${cityName}, India
 
 Return ONLY valid JSON with this exact shape — no prose, no markdown:
 {"low": <20th-percentile rate in ${currency}>, "mid": <median rate in ${currency}>, "high": <80th-percentile rate in ${currency}>}
@@ -314,33 +366,34 @@ Return ONLY valid JSON with this exact shape — no prose, no markdown:
 Rules:
 - For supply items (Nos, each): give the typical wholesale/dealer price for the exact specification described.
 - For service items (Job, LS, lot): give the total contract price for a single complete job including labour, tools, and overheads.
-- Base rates on real Indian HVAC / MEP / FM market data for ${cityName}.
+- Give the national baseline, averaged across major Indian metros. Do NOT add a premium or discount for any particular city — the caller applies its own city cost index.
 - Return plain integers or decimals only (no currency symbols, no commas).`;
 
   try {
-    const ai = geminiClient();
-    const result = await withGeminiRetry(() =>
-      ai.models.generateContent({
-        model: "gemini-flash-lite-latest",
-        contents: [{ role: "user" as const, parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" },
-      }),
-    );
+    // Temperature 0 and a cached baseline together make the answer repeatable.
+    // Sampled at the default temperature the same item came back at 2.5L on one
+    // call and 2.75L on the next — and "Testing, BMS Integration & Balancing"
+    // swung between 75K and 2.5L — so re-pricing a document to another city
+    // moved the benchmark for reasons that had nothing to do with the city, and
+    // two cities could not be compared at all.
+    const parsed = await nationalBaseline(prompt, `${description}|${unit}|${currency}`);
+    if (!parsed) return [];
 
-    const text = result.text ?? "";
-    if (!text.trim()) return [];
-
-    const parsed = JSON.parse(text) as { low?: number; mid?: number; high?: number };
     const { low, mid, high } = parsed;
     if (!mid || mid <= 0) return [];
 
+    // The published city cost index is what turns a national baseline into a
+    // local one — the same factor the rate book is indexed by, so a line
+    // benchmarked on market quotes and one benchmarked on the rate book move
+    // by the same amount when the document is re-priced to another city.
+    const indexFactor = getCityAny(cityId)?.indexFactor ?? 1;
     const prices = [low, mid, high]
       .filter((p): p is number => typeof p === "number" && p > 0)
-      .map(Math.round);
+      .map((price) => Math.round(price * indexFactor));
 
     return prices.slice(0, limit).map((price, i) => ({
       id: `gemini-price-${cityId}-${i}-${fetchedAt}`,
-      seller: "AI Market Estimate",
+      seller: `AI Market Estimate (${cityName} index)`,
       platform: "Web search" as MarketPlatform,
       price,
       unit,
