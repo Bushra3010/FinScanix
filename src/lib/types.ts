@@ -202,13 +202,13 @@ export interface Invoice {
   subtotal: number;
   taxPct: number;
   total: number;
-  /** The document's own printed subtotal — more reliable than the derived
-   *  subtotal when line-item extraction has minor variance. Null when the
-   *  document does not print a subtotal, or it could not be read. */
+  /** The document's own printed subtotal (before tax). Used as the "Quoted
+   *  Value" on the report so rounding or rate extraction errors do not skew
+   *  the displayed figure away from what the vendor actually quoted. Null when
+   *  the document does not print a subtotal, or it could not be read. */
   documentSubtotal?: number;
-  /** The document's own printed grand total. Used as the "Quoted Value" on the
-   *  report so rounding or rate extraction errors do not skew the displayed
-   *  total away from what the vendor actually charged. Null if unreadable. */
+  /** The document's own printed grand total, including GST/VAT. Not the
+   *  "Quoted Value" — that is reported pre-tax. Null if unreadable. */
   documentTotal?: number;
   lineItems: LineItem[];
 }

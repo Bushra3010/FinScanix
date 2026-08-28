@@ -345,9 +345,10 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
           position,
         })),
       },
-      // The document's own printed subtotal and grand total — the authoritative
-      // source for "Quoted Value" so extraction variance in line items does not
-      // push the displayed total away from what the vendor actually charged.
+      // The document's own printed subtotal and grand total. The subtotal is
+      // the authoritative source for the pre-tax "Quoted Value" so extraction
+      // variance in line items does not push the displayed figure away from
+      // what the vendor actually quoted.
       documentSubtotal: extracted?.documentSubtotal ?? null,
       documentTotal: extracted?.documentTotal ?? null,
     },

@@ -129,14 +129,16 @@ export default async function InvoiceDetailPage({
   const isGcc = invoice.city?.region === "gcc";
 
   /* Format helpers */
-  // Use the document's own printed total as the authoritative "Quoted Value".
-  // Fall back to the computed total only when the document did not print one
-  // (e.g. scanned PDF with no readable totals, or very early records before
-  // this field was captured).
-  const quotedValue = invoice.documentTotal != null && invoice.documentTotal > 0
-    ? formatCurrency(invoice.documentTotal, currency, { compact: true, decimals: 0 })
-    : invoice.total > 0
-      ? formatCurrency(invoice.total, currency, { compact: true, decimals: 0 })
+  // "Quoted Value" is the pre-tax quoted amount — the same basis as Section A,
+  // the dashboard list and the exports. Prefer the document's own printed
+  // subtotal; fall back to the sum of the line items when the document did not
+  // print one (e.g. scanned PDF with no readable totals, or early records from
+  // before this field was captured). Never use documentTotal here: that is the
+  // printed grand total *including* GST/VAT, which is a different basis.
+  const quotedValue = invoice.documentSubtotal != null && invoice.documentSubtotal > 0
+    ? formatCurrency(invoice.documentSubtotal, currency, { compact: true, decimals: 0 })
+    : invoice.subtotal > 0
+      ? formatCurrency(invoice.subtotal, currency, { compact: true, decimals: 0 })
       : "—";
   const potentialSaving =
     invoice.summary?.potentialSaving > 0

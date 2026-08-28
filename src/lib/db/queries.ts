@@ -176,7 +176,8 @@ function toInvoice(row: InvoiceRow): Invoice {
     taxPct: row.taxPct,
     total: round2(subtotal * (1 + row.taxPct / 100)),
     // The document's own printed totals, if they were read during extraction.
-    // These are the authoritative source for the "Quoted Value" on the report.
+    // documentSubtotal is the authoritative source for the pre-tax "Quoted
+    // Value" on the report; documentTotal is the tax-inclusive grand total.
     documentSubtotal: row.documentSubtotal ?? undefined,
     documentTotal: row.documentTotal ?? undefined,
     lineItems,

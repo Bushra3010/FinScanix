@@ -75,8 +75,8 @@ export interface ExtractionResult {
   /**
    * The document's own printed subtotal and grand total, read from the
    * totals section at the bottom of the document rather than derived from
-   * line items. Used as the authoritative "Quoted Value" on the report.
-   * Undefined when the document does not print these figures, or they
+   * line items. The subtotal is the authoritative pre-tax "Quoted Value" on
+   * the report. Undefined when the document does not print these figures, or they
    * could not be parsed.
    */
   documentSubtotal?: number;
