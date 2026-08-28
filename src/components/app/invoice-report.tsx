@@ -38,6 +38,8 @@ import { HealthBadge, VarianceBadge, VariancePct } from "@/components/variance-b
 import { useSession } from "@/components/app/session-context";
 import { analyseLines, summarise, VARIANCE_CONFIG } from "@/lib/variance";
 import { deriveScopeAnalysis } from "@/lib/scope-gaps";
+import { analyseCommercialTerms, hasTerms } from "@/lib/commercial-terms";
+import { buildRecommendations } from "@/lib/recommendations";
 import type { AnalysedInvoice, City, LineItem, VarianceFlag } from "@/lib/types";
 import { cn, formatINR, formatNumber, relativeTime } from "@/lib/utils";
 
@@ -507,48 +509,25 @@ export function InvoiceReport({
     };
   }, [analysed, invoice.exclusions, invoice.scopeGaps, invoice.ambiguities, invoice.project]);
 
+  /* ── Commercial terms: what the stated payment and delivery terms expose ── */
+  const termsFindings = useMemo(
+    () => analyseCommercialTerms(invoice.commercialTerms),
+    [invoice.commercialTerms],
+  );
+
   /* ── Final (bottom) Recommended Actions — document-specific ── */
-  const finalRecommendations = useMemo<string[]>(() => {
-    const recs: string[] = [];
-    const descs = analysed.map((l) => l.description.toLowerCase());
-
-    // RCC / structural specs
-    if (descs.some((d) => d.includes("rcc") || d.includes("concrete") || d.includes("reinforce")))
-      recs.push("Verify exact RCC and reinforcement specifications with structural drawings.");
-
-    // Branded equivalent / approved make ambiguity
-    const brandedLine = analysed.find((l) =>
-      ["branded", "equivalent", "approved make", "similar"].some((k) => l.description.toLowerCase().includes(k)),
-    );
-    if (brandedLine) {
-      const dl = brandedLine.description.toLowerCase();
-      const type = dl.includes("pump") || dl.includes("filter") ? "pump and filter" : "equipment";
-      recs.push(`Request clarification on 'branded equivalent' ${type} makes.`);
-    } else if (sowAnalysis.ambiguities.some((a) => a.toLowerCase().includes("branded"))) {
-      recs.push("Request clarification on 'branded equivalent' equipment specifications.");
-    }
-
-    // Arithmetic errors in BOQ
-    if (auditErrors.length > 0)
-      recs.push("Correct the mathematical discrepancies in the BOQ tables.");
-
-    // Missing soil testing
-    if (sowAnalysis.missingItems.some((m) => m.toLowerCase().includes("soil")))
-      recs.push("Request a site-specific survey to finalise dimensions and soil conditions.");
-
-    // Over-priced negotiation
-    if (summary.overCount > 0)
-      recs.push(`Renegotiate pricing on ${summary.overCount} over-priced line item${summary.overCount === 1 ? "" : "s"} using the attached market benchmarks.`);
-
-    // Unmatched items
-    if (summary.unmatchedCount > 0)
-      recs.push(`Obtain rate justification from the vendor for ${summary.unmatchedCount} unmatched item${summary.unmatchedCount === 1 ? "" : "s"} before approving.`);
-
-    if (recs.length === 0)
-      recs.push("All figures verified — approve quotation subject to standard commercial terms.");
-
-    return recs.slice(0, 5);
-  }, [analysed, sowAnalysis, auditErrors, summary]);
+  const finalRecommendations = useMemo<string[]>(
+    () =>
+      buildRecommendations({
+        overCount: summary.overCount,
+        unmatchedCount: summary.unmatchedCount,
+        auditErrorCount: auditErrors.length,
+        gaps: sowAnalysis.missingItems,
+        ambiguities: sowAnalysis.ambiguities,
+        termsFindings,
+      }),
+    [sowAnalysis, auditErrors, summary, termsFindings],
+  );
 
   return (
     <>
@@ -1694,6 +1673,94 @@ export function InvoiceReport({
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Commercial Terms ── */}
+      {hasTerms(invoice.commercialTerms) && (
+        <Card className="mt-6 overflow-hidden">
+          <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-foreground">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold text-foreground">Commercial Terms</h3>
+              <p className="text-[12.5px] text-muted-foreground">
+                Payment, tax, validity and delivery as the document states them
+              </p>
+            </div>
+          </div>
+
+          <CardContent className="pt-5">
+            <div className="grid gap-8 sm:grid-cols-2">
+              {/* As printed on the document */}
+              <div className="space-y-3">
+                {([
+                  ["Payment schedule", invoice.commercialTerms?.payment],
+                  ["Taxes", invoice.commercialTerms?.taxes],
+                  ["Validity", invoice.commercialTerms?.validity],
+                  ["Delivery", invoice.commercialTerms?.delivery],
+                  ["Warranty", invoice.commercialTerms?.warranty],
+                ] as const)
+                  .filter(([, value]) => Boolean(value))
+                  .map(([label, value]) => (
+                    <div key={label} className="border-b border-border pb-3 last:border-0 last:pb-0">
+                      <p className="text-[11.5px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                      <p className="mt-1 text-[13.5px] text-foreground">{value}</p>
+                    </div>
+                  ))}
+                {invoice.commercialTerms?.other?.length ? (
+                  <div>
+                    <p className="text-[11.5px] uppercase tracking-wide text-muted-foreground">Other terms</p>
+                    <ul className="mt-1.5 space-y-1.5">
+                      {invoice.commercialTerms.other.map((item, idx) => (
+                        <li key={`${idx}-${item}`} className="flex items-start gap-2.5 text-[13px] text-muted-foreground">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* What those terms expose the buyer to */}
+              <div>
+                <p className="mb-3 text-[13.5px] font-semibold text-foreground">Commercial Exposure</p>
+                {termsFindings.length > 0 ? (
+                  <ul className="space-y-3">
+                    {termsFindings.map((finding, idx) => (
+                      <li key={`${idx}-${finding.label}`} className="rounded-lg border border-border bg-surface-sunken/40 px-3.5 py-3">
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className={cn(
+                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                              finding.severity === "high"
+                                ? "bg-over"
+                                : finding.severity === "medium"
+                                  ? "bg-warning"
+                                  : "bg-muted-foreground/60",
+                            )}
+                          />
+                          <div>
+                            <p className="text-[13px] font-semibold text-foreground">{finding.label}</p>
+                            <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+                              {finding.detail}
+                            </p>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="flex items-start gap-2.5 text-[13px] text-muted-foreground">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-par" />
+                    Nothing unusual in the stated terms.
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Section C · Risk Red Flags ── */}
       {riskFlags.length > 0 && (
