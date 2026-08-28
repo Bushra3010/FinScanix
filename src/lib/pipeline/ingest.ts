@@ -338,7 +338,9 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
         : undefined,
       // Scope gaps and ambiguities are judged against this document's own scope
       // of work, so they are stored per document rather than re-derived from a
-      // fixed checklist that would read the same on every quotation.
+      // fixed checklist that would read the same on every quotation. The vision
+      // path reads them off the page; anything else has them read from the line
+      // items on first view.
       scopeGaps: extracted?.scopeGaps && extracted.scopeGaps.length > 0
         ? extracted.scopeGaps
         : undefined,

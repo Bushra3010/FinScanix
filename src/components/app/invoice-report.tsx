@@ -488,8 +488,11 @@ export function InvoiceReport({
       exclusions,
       project: invoice.project,
     });
-    const missingItems = (invoice.scopeGaps?.length ? invoice.scopeGaps : derived.gaps).slice(0, 5);
-    const ambiguities = (invoice.ambiguities?.length ? invoice.ambiguities : derived.ambiguities).slice(0, 5);
+    // An empty stored array means the document was read and nothing was found,
+    // which is an answer — only a document never read falls back to the
+    // derived checklist.
+    const missingItems = (invoice.scopeGaps ?? derived.gaps).slice(0, 5);
+    const ambiguities = (invoice.ambiguities ?? derived.ambiguities).slice(0, 5);
 
     // Each unpriced item and each loose phrase is something the buyer may end
     // up paying for outside this quotation, so both pull the score down.

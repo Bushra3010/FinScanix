@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth/guard";
 import { deleteInvoiceAction } from "@/lib/invoices/actions";
 import { getInvoice, listCities } from "@/lib/db/queries";
+import { ensureScopeAnalysis } from "@/lib/pipeline/scope-analysis";
 import type { AnalysedInvoice } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -119,6 +120,17 @@ export default async function InvoiceDetailPage({
 
   const processing = invoice.status === "extracting" || invoice.status === "queued";
   const rejected = invoice.status === "rejected" || invoice.status === "failed";
+
+  // Documents analysed before scope gaps were captured have none stored. Read
+  // them from the line items on first view and keep the result, so Section B is
+  // about this document rather than a checklist every quotation would fail.
+  if (!processing && !rejected && !invoice.scopeGaps && !invoice.ambiguities) {
+    const analysis = await ensureScopeAnalysis(invoice.id);
+    if (analysis) {
+      invoice.scopeGaps = analysis.gaps;
+      invoice.ambiguities = analysis.ambiguities;
+    }
+  }
 
   /* Audit score is only meaningful once analysis is complete */
   const score = !processing && !rejected ? computeAuditScore(invoice) : null;
