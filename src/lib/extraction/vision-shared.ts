@@ -22,7 +22,7 @@ For "documentTitle": look for a project or work title printed prominently on the
 For "exclusions": look for any "Exclusions", "Scope Exclusions", "Not included", or "Terms" section in the document. Return each exclusion as a short plain-text string. If none are stated, return an empty array.`;
 
 export const OCR_USER_PROMPT =
-  "Extract every billed line item from this document, along with the vendor, GSTIN, document number and GST rate.";
+  "Extract every billed line item from this document, along with the vendor, GSTIN, document number, GST rate, document title, and exclusions. Also return the document's printed Subtotal and Grand Total if visible — these are the totals printed on the document (usually near the bottom), NOT the sum of the line items.";
 
 export interface VisionLine {
   description: string;
@@ -41,6 +41,10 @@ export interface VisionPayload {
   taxPct: number;
   lines: VisionLine[];
   exclusions: string[];
+  /** The document's own printed subtotal, read from the totals section. */
+  documentSubtotal?: number;
+  /** The document's own printed grand total, read from the totals section. */
+  documentTotal?: number;
 }
 
 export const IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -92,6 +96,8 @@ export function toExtractionResult(payload: VisionPayload, provider: string): Ex
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
     exclusions: exclusions.length > 0 ? exclusions : undefined,
+    documentSubtotal: Number.isFinite(payload.documentSubtotal ?? 0) && (payload.documentSubtotal ?? 0) > 0 ? payload.documentSubtotal : undefined,
+    documentTotal: Number.isFinite(payload.documentTotal ?? 0) && (payload.documentTotal ?? 0) > 0 ? payload.documentTotal : undefined,
     // The vision path reads the page as an image, so there is no text layer to
     // sample a script from; the model is prompted in English.
     language: "English",

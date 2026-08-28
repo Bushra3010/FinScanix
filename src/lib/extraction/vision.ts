@@ -46,6 +46,8 @@ const EXTRACTION_SCHEMA = {
         additionalProperties: false,
       },
     },
+    documentSubtotal: { type: "number", description: "The printed subtotal (before tax) in rupees, if visible on the document" },
+    documentTotal: { type: "number", description: "The printed grand total (including all taxes) in rupees, if visible on the document" },
   },
   required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines"],
   additionalProperties: false,
@@ -55,7 +57,7 @@ const SYSTEM = `You read vendor invoices and quotations from the Indian construc
 
 Transcribe only what is printed. Never infer a rate, quantity or amount that you cannot read — set "legible": false on any row where a figure is unclear, and give your best reading rather than a plausible-looking invention.
 
-Exclude subtotal, tax, discount, round-off and grand-total rows: they are not line items. Keep the vendor's own wording for each description verbatim, since it is matched against a rate book downstream.
+Exclude subtotal, tax, discount, round-off and grand-total rows from the lines array: they are not line items. Keep the vendor's own wording for each description verbatim, since it is matched against a rate book downstream.
 
 Amounts are in Indian rupees. Report rate and amount as plain numbers with no currency symbol or thousands separator.`;
 
@@ -72,8 +74,11 @@ type VisionPayload = {
   vendor: string;
   vendorGstin: string;
   documentNumber: string;
+  documentTitle: string;
   taxPct: number;
   lines: VisionLine[];
+  documentSubtotal?: number;
+  documentTotal?: number;
 };
 
 const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -148,7 +153,7 @@ export async function extractFromImage(
             source,
             {
               type: "text",
-              text: "Extract every billed line item from this document, along with the vendor, GSTIN, document number and GST rate.",
+              text: "Extract every billed line item from this document, along with the vendor, GSTIN, document number, GST rate, document title, exclusions, and the document's printed Subtotal and Grand Total if visible. The subtotal and grand total are the figures printed near the bottom of the document (e.g. Subtotal, Taxable Amount, Grand Total, Total Payable, Net Amount Payable) — NOT the sum of the line items.",
             },
           ],
         },
@@ -218,8 +223,11 @@ export async function extractFromImage(
     vendor: payload.vendor?.trim() || undefined,
     vendorGstin: payload.vendorGstin?.trim() || undefined,
     documentNumber: payload.documentNumber?.trim() || undefined,
+    documentTitle: payload.documentTitle?.trim() || undefined,
     taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
     needsOcr: false,
+    documentSubtotal: Number.isFinite(payload.documentSubtotal ?? 0) && (payload.documentSubtotal ?? 0) > 0 ? payload.documentSubtotal : undefined,
+    documentTotal: Number.isFinite(payload.documentTotal ?? 0) && (payload.documentTotal ?? 0) > 0 ? payload.documentTotal : undefined,
     // The vision path reads the page as an image, so there is no text layer to
     // sample a script from; the model is prompted in English.
     language: "English",

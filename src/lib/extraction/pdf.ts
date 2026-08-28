@@ -73,16 +73,25 @@ export interface ExtractionResult {
   /** Script detected in the text layer, which is not always Latin here. */
   language: string;
   /**
-   * The reconstructed text, first few hundred characters. Surfaced when no rows
-   * are found so the failure can be diagnosed from the report rather than
-   * guessed at.
+   * The document's own printed subtotal and grand total, read from the
+   * totals section at the bottom of the document rather than derived from
+   * line items. Used as the authoritative "Quoted Value" on the report.
+   * Undefined when the document does not print these figures, or they
+   * could not be parsed.
    */
-  sampleText: string;
+  documentSubtotal?: number;
+  documentTotal?: number;
   /**
    * Items the vendor explicitly stated as excluded from scope, read from the
    * document's Exclusions / Terms section. Undefined when no such section was found.
    */
   exclusions?: string[];
+  /**
+   * The reconstructed text, first few hundred characters. Surfaced when no rows
+   * are found so the failure can be diagnosed from the report rather than
+   * guessed at.
+   */
+  sampleText: string;
 }
 
 /** Units seen in Indian construction and FM billing. */
@@ -162,6 +171,74 @@ function detectLanguage(body: string) {
 
 function toNumber(token: string) {
   return Number(token.replace(/,/g, ""));
+}
+
+/**
+ * Reads the document's own printed subtotal or grand total from its text body.
+ *
+ * A line in an Indian quotation like
+ *   "Subtotal: Rs. 3,20,000.00"
+ *   "TOTAL  ₹ 3,78,400  (inclusive of GST)"
+ *   "GRAND TOTAL       3,78,400.00"
+ *   "Net Amount Payable: INR 3,78,400"
+ * carries one figure and a label. The rightmost number on a labelled line is
+ * the value, since the label is always on the left and rupee figures either
+ * precede or follow it. We accept "label on the left, value on the right"
+ * because every standard quotation template does it that way.
+ *
+ * The figure is not validated against the sum of the parsed line items — that
+ * would force every discrepancy into one of two interpretations ("extraction
+ * wrong" or "vendor wrong"), and we have no way to tell which is right. The
+ * report already shows the discrepancy side-by-side in the audit panel.
+ */
+function readDocumentTotal(body: string, kind: "subtotal" | "grand"): number | undefined {
+  // Patterns are read with the rupee sign / INR / Rs. stripped first — the
+  // sign is encoded in a private-use codepoint in some fonts and confuses the
+  // number regex when it arrives glued to the figure.
+  const cleaned = body
+    .replace(/[  ]/g, " ")
+    .replace(/[₹₨₹]/g, "INR ")
+    .replace(/INR\s*\.?\s*/gi, "");
+
+  // The grand-total pattern matches the strongest labels first, so that
+  // "Total: 3,78,400" (the bottom line) is preferred over "Quantity Total: 12"
+  // (a column footer we never want to read as the grand total).
+  const grandPatterns = [
+    /(grand\s*total|total\s*payable|net\s*amount(?:\s*payable)?|amount\s*payable|total\s*amount(?:\s*payable)?|total\s*\(?(?:incl\.?|inclusive)\w*\s*(?:of\s*)?(?:gst|vat|tax)\)?|final\s*amount|total\s*in\s*words\s*[:\-]?\s*(?:[a-z]+\s+)*)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)/gi,
+    /\btotal\b\s*[:\-]?\s*([\d,]+(?:\.\d+)?)/gi,
+  ];
+
+  const subtotalPatterns = [
+    /(?:sub\s*-?\s*total|sub\s*total|taxable\s*value|taxable\s*amount|total\s*before\s*tax|net\s*amount\s*\(?before\s*tax\)?|amount\s*before\s*tax)\s*[:\-]?\s*([\d,]+(?:\.\d+)?)/gi,
+  ];
+
+  const patterns = kind === "grand" ? grandPatterns : subtotalPatterns;
+
+  // Search line-by-line so a label on one line does not grab a number from a
+  // following line.
+  const lines = cleaned.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    for (const pattern of patterns) {
+      // Each pattern is global with the capture group on the figure.
+      pattern.lastIndex = 0;
+      const matches = [...line.matchAll(pattern)];
+      if (matches.length === 0) continue;
+      // Take the rightmost figure on this line — the label is leftmost by
+      // convention, and a stray number on the left side (date, ref no.)
+      // should not be picked up.
+      const figures = matches
+        .map((m) => (kind === "grand" ? m[2] : m[1]))
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.replace(/,/g, ""))
+        .map(Number)
+        .filter((value) => Number.isFinite(value) && value > 0);
+      if (figures.length === 0) continue;
+      return figures[figures.length - 1];
+    }
+  }
+
+  return undefined;
 }
 
 function isNumeric(token: string) {
@@ -861,5 +938,7 @@ export async function extractFromPdf(bytes: Uint8Array): Promise<ExtractionResul
     note: assembled.note,
     language: detectLanguage(body),
     sampleText: body.slice(0, 600),
+    documentSubtotal: readDocumentTotal(body, "subtotal"),
+    documentTotal: readDocumentTotal(body, "grand"),
   };
 }

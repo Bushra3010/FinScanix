@@ -64,9 +64,17 @@ const EXTRACTION_SCHEMA = {
       description: "Items the vendor explicitly stated as NOT included — from an Exclusions, Scope Exclusions, Not Included, or Terms section. Empty array if no exclusions are stated.",
       items: { type: Type.STRING },
     },
+    documentSubtotal: {
+      type: Type.NUMBER,
+      description: "The printed subtotal (amount before tax) in rupees, if visible on the document. Return 0 if not visible.",
+    },
+    documentTotal: {
+      type: Type.NUMBER,
+      description: "The printed grand total (amount including all taxes) in rupees, if visible on the document. Return 0 if not visible.",
+    },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions"],
+  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "documentSubtotal", "documentTotal"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "documentSubtotal", "documentTotal"],
 };
 
 export function geminiConfigured() {

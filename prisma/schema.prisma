@@ -180,6 +180,12 @@ model Invoice {
   language       String?
   /// Vendor-stated exclusions parsed from the document's terms / notes section.
   exclusions     Json?
+  /// The document's own subtotal and grand total, read from the printed totals
+  /// rather than derived from line items. Used as the authoritative "Quoted Value"
+  /// on the report so rounding or extraction variance in line items cannot skew
+  /// the displayed total away from what the vendor actually charged.
+  documentSubtotal Float?
+  documentTotal    Float?
 
   // Quality gate outcome — FR-1.2
   qualityPassed   Boolean

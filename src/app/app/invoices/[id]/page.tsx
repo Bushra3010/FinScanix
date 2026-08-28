@@ -129,8 +129,13 @@ export default async function InvoiceDetailPage({
   const isGcc = invoice.city?.region === "gcc";
 
   /* Format helpers */
-  const quotedValue =
-    invoice.total > 0
+  // Use the document's own printed total as the authoritative "Quoted Value".
+  // Fall back to the computed total only when the document did not print one
+  // (e.g. scanned PDF with no readable totals, or very early records before
+  // this field was captured).
+  const quotedValue = invoice.documentTotal != null && invoice.documentTotal > 0
+    ? formatCurrency(invoice.documentTotal, currency, { compact: true, decimals: 0 })
+    : invoice.total > 0
       ? formatCurrency(invoice.total, currency, { compact: true, decimals: 0 })
       : "—";
   const potentialSaving =
