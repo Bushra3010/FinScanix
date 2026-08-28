@@ -198,6 +198,13 @@ export interface Invoice {
   language?: string;
   /** Items the vendor explicitly excluded from scope, parsed from the document. */
   exclusions?: string[];
+  /** Items this scope of work would normally price but this document does not,
+   *  as judged against the document itself. Undefined when it was analysed
+   *  before these were captured, or read through the text-layer path. */
+  scopeGaps?: string[];
+  /** Wording in this document too loose to hold the vendor to. Undefined on the
+   *  same terms as {@link scopeGaps}. */
+  ambiguities?: string[];
   quality: QualityReport;
   subtotal: number;
   taxPct: number;

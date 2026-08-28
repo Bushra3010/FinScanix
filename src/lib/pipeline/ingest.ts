@@ -336,6 +336,15 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       exclusions: extracted?.exclusions && extracted.exclusions.length > 0
         ? extracted.exclusions
         : undefined,
+      // Scope gaps and ambiguities are judged against this document's own scope
+      // of work, so they are stored per document rather than re-derived from a
+      // fixed checklist that would read the same on every quotation.
+      scopeGaps: extracted?.scopeGaps && extracted.scopeGaps.length > 0
+        ? extracted.scopeGaps
+        : undefined,
+      ambiguities: extracted?.ambiguities && extracted.ambiguities.length > 0
+        ? extracted.ambiguities
+        : undefined,
       qualityChecks: {
         create: checks.map((check, position) => ({
           key: check.id,

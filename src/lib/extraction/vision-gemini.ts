@@ -64,6 +64,16 @@ const EXTRACTION_SCHEMA = {
       description: "Items the vendor explicitly stated as NOT included — from an Exclusions, Scope Exclusions, Not Included, or Terms section. Empty array if no exclusions are stated.",
       items: { type: Type.STRING },
     },
+    scopeGaps: {
+      type: Type.ARRAY,
+      description: "Up to 5 items a buyer would expect to be priced for this particular scope of work, but which this document neither prices nor excludes. Judge against the trade the document is for. Empty array if the quotation is complete.",
+      items: { type: Type.STRING },
+    },
+    ambiguities: {
+      type: Type.ARRAY,
+      description: "Up to 5 pieces of wording in this document that are too loose to hold the vendor to — unnamed makes, open quantities, undefined responsibility, deferred specifications. Each entry reads 'item — what is left undefined', never the item description on its own. Empty array if the document is specific throughout.",
+      items: { type: Type.STRING },
+    },
     documentSubtotal: {
       type: Type.NUMBER,
       description: "The printed subtotal (amount before tax) in rupees, if visible on the document. Return 0 if not visible.",
@@ -73,8 +83,8 @@ const EXTRACTION_SCHEMA = {
       description: "The printed grand total (amount including all taxes) in rupees, if visible on the document. Return 0 if not visible.",
     },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "documentSubtotal", "documentTotal"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "documentSubtotal", "documentTotal"],
+  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
 };
 
 export function geminiConfigured() {

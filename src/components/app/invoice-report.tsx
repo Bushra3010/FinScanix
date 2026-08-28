@@ -37,6 +37,7 @@ import { Table, TableWrap, TBody, TD, TH, THead } from "@/components/ui/table";
 import { HealthBadge, VarianceBadge, VariancePct } from "@/components/variance-badge";
 import { useSession } from "@/components/app/session-context";
 import { analyseLines, summarise, VARIANCE_CONFIG } from "@/lib/variance";
+import { deriveScopeAnalysis } from "@/lib/scope-gaps";
 import type { AnalysedInvoice, City, LineItem, VarianceFlag } from "@/lib/types";
 import { cn, formatINR, formatNumber, relativeTime } from "@/lib/utils";
 
@@ -466,55 +467,42 @@ export function InvoiceReport({
 
   /* ── SOW & Gap Analysis (Section B) ── */
   const sowAnalysis = useMemo(() => {
-    const descs = analysed.map((l) => l.description.toLowerCase());
-
     // Extracted scope = the actual line item descriptions from the document.
     // Each line item IS a scope item; displaying them directly is far more
     // accurate than mapping through a hardcoded category list that only covers
     // civil/pool works and misses HVAC, MEP, FM and other trades.
     const extractedScope = analysed.map((l) => l.description.trim());
 
-    // Ambiguities: lines containing vague specification language
-    const AMBIG_KW = ["branded", "equivalent", "similar", "approved make", "as per specification"];
-    const ambiguities: string[] = [];
-    for (const line of analysed) {
-      const dl = line.description.toLowerCase();
-      if (AMBIG_KW.some((k) => dl.includes(k))) {
-        ambiguities.push(`Exact definition of '${line.description.trim()}' specification`);
-      }
-    }
-    if (!descs.some((d) => d.includes("temporary") && (d.includes("water") || d.includes("electric")))) {
-      ambiguities.push("Responsibility for temporary water and electricity supply during works");
-    }
-
-    // Missing items: a lightweight checklist of items that are often forgotten
-    const STANDARD_CHECKLIST = [
-      "Statutory approval fees",
-      "Insurance and performance bond",
-      "Temporary utilities (power / water)",
-    ];
-    const missingItems = STANDARD_CHECKLIST.filter((item) => {
-      const key = item.toLowerCase().split(" ")[0];
-      return !descs.some((d) => d.includes(key));
-    });
-
     // Exclusions: use what the vision model read from the document's
     // Exclusions / Terms section. Fall back to an empty list — never show
     // a hardcoded list that doesn't match the actual document.
     const exclusions = invoice.exclusions ?? [];
 
-    const issueCount = missingItems.length + Math.min(ambiguities.length, 3);
-    const maxIssues = STANDARD_CHECKLIST.length + 3;
-    const scopeRiskScore = Math.max(10, Math.round(100 - (issueCount / maxIssues) * 100));
+    // What the model read from this document wins: it saw the terms and notes,
+    // not just the priced rows. The derived analysis stands in for documents
+    // analysed before scope gaps were captured, and reads this document's own
+    // line items rather than a fixed checklist that would be identical on every
+    // quotation.
+    const derived = deriveScopeAnalysis({
+      descriptions: analysed.map((l) => l.description),
+      exclusions,
+      project: invoice.project,
+    });
+    const missingItems = (invoice.scopeGaps?.length ? invoice.scopeGaps : derived.gaps).slice(0, 5);
+    const ambiguities = (invoice.ambiguities?.length ? invoice.ambiguities : derived.ambiguities).slice(0, 5);
+
+    // Each unpriced item and each loose phrase is something the buyer may end
+    // up paying for outside this quotation, so both pull the score down.
+    const scopeRiskScore = Math.max(10, 100 - missingItems.length * 7 - ambiguities.length * 6);
 
     return {
       extractedScope: extractedScope.length > 0 ? extractedScope : ["(no line items found)"],
       missingItems,
-      ambiguities: ambiguities.slice(0, 4),
+      ambiguities,
       exclusions,
       scopeRiskScore,
     };
-  }, [analysed, invoice.exclusions]);
+  }, [analysed, invoice.exclusions, invoice.scopeGaps, invoice.ambiguities, invoice.project]);
 
   /* ── Final (bottom) Recommended Actions — document-specific ── */
   const finalRecommendations = useMemo<string[]>(() => {
@@ -1652,8 +1640,8 @@ export function InvoiceReport({
                     <p className="text-[13.5px] font-semibold text-foreground">Missing Items</p>
                   </div>
                   <ul className="space-y-2">
-                    {sowAnalysis.missingItems.map((item) => (
-                      <li key={item} className="flex items-start gap-2.5 text-[13px] text-foreground">
+                    {sowAnalysis.missingItems.map((item, idx) => (
+                      <li key={`${idx}-${item}`} className="flex items-start gap-2.5 text-[13px] text-foreground">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
                         {item}
                       </li>
@@ -1667,13 +1655,21 @@ export function InvoiceReport({
                 <div>
                   <p className="mb-3 text-[13.5px] font-semibold text-foreground">Ambiguities</p>
                   <ul className="space-y-2">
-                    {sowAnalysis.ambiguities.map((item) => (
-                      <li key={item} className="flex items-start gap-2.5 text-[13px] text-foreground">
+                    {sowAnalysis.ambiguities.map((item, idx) => (
+                      <li key={`${idx}-${item}`} className="flex items-start gap-2.5 text-[13px] text-foreground">
                         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
                         {item}
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {/* Nothing found — say so, rather than leaving the column blank */}
+              {sowAnalysis.missingItems.length === 0 && sowAnalysis.ambiguities.length === 0 && (
+                <div className="flex items-start gap-2.5 text-[13px] text-muted-foreground">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-par" />
+                  No scope gaps or ambiguous wording found in this document.
                 </div>
               )}
 

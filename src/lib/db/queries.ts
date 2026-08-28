@@ -169,6 +169,8 @@ function toInvoice(row: InvoiceRow): Invoice {
     extractionNote: row.extractionNote ?? undefined,
     language: row.language ?? undefined,
     exclusions: Array.isArray(row.exclusions) ? (row.exclusions as string[]) : undefined,
+    scopeGaps: Array.isArray(row.scopeGaps) ? (row.scopeGaps as string[]) : undefined,
+    ambiguities: Array.isArray(row.ambiguities) ? (row.ambiguities as string[]) : undefined,
     quality: toQualityReport(row),
     // Totals are derived, never stored — the line items are the only source of
     // truth, so a corrected line can never leave a stale total behind.

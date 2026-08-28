@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ExtractedLine, ExtractionResult } from "./pdf";
+import type { ExtractionResult } from "./pdf";
 import { extractWithGemini, geminiConfigured } from "./vision-gemini";
+import {
+  IMAGE_MEDIA_TYPES,
+  OCR_SYSTEM_PROMPT,
+  OCR_USER_PROMPT,
+  toExtractionResult,
+  type VisionPayload,
+} from "./vision-shared";
 
 /**
  * OCR extraction for scans and photographs — the FR-2.1 path that the text-layer
@@ -25,6 +32,7 @@ const EXTRACTION_SCHEMA = {
     vendor: { type: "string", description: "Supplier name as printed on the document" },
     vendorGstin: { type: "string", description: "15-character GSTIN, or empty string if absent" },
     documentNumber: { type: "string", description: "Invoice or quotation number" },
+    documentTitle: { type: "string", description: "The project or work title printed on the document, e.g. 'HRU Replacement Project'. Empty string if absent." },
     taxPct: { type: "number", description: "GST percentage applied, e.g. 18" },
     lines: {
       type: "array",
@@ -46,42 +54,27 @@ const EXTRACTION_SCHEMA = {
         additionalProperties: false,
       },
     },
+    exclusions: {
+      type: "array",
+      description: "Items the vendor explicitly stated as NOT included, from an Exclusions, Scope Exclusions, Not Included or Terms section. Empty array if none are stated.",
+      items: { type: "string" },
+    },
+    scopeGaps: {
+      type: "array",
+      description: "Up to 5 items a buyer would expect to be priced for this particular scope of work, but which this document neither prices nor excludes. Empty array if the quotation is complete.",
+      items: { type: "string" },
+    },
+    ambiguities: {
+      type: "array",
+      description: "Up to 5 pieces of wording in this document that are too loose to hold the vendor to. Each entry reads 'item — what is left undefined', never the item description on its own. Empty array if the document is specific throughout.",
+      items: { type: "string" },
+    },
     documentSubtotal: { type: "number", description: "The printed subtotal (before tax) in rupees, if visible on the document" },
     documentTotal: { type: "number", description: "The printed grand total (including all taxes) in rupees, if visible on the document" },
   },
   required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines"],
   additionalProperties: false,
 } as const;
-
-const SYSTEM = `You read vendor invoices and quotations from the Indian construction and facilities-management sector and return their line items.
-
-Transcribe only what is printed. Never infer a rate, quantity or amount that you cannot read — set "legible": false on any row where a figure is unclear, and give your best reading rather than a plausible-looking invention.
-
-Exclude subtotal, tax, discount, round-off and grand-total rows from the lines array: they are not line items. Keep the vendor's own wording for each description verbatim, since it is matched against a rate book downstream.
-
-Amounts are in Indian rupees. Report rate and amount as plain numbers with no currency symbol or thousands separator.`;
-
-type VisionLine = {
-  description: string;
-  unit: string;
-  quantity: number;
-  rate: number;
-  amount: number;
-  legible: boolean;
-};
-
-type VisionPayload = {
-  vendor: string;
-  vendorGstin: string;
-  documentNumber: string;
-  documentTitle: string;
-  taxPct: number;
-  lines: VisionLine[];
-  documentSubtotal?: number;
-  documentTotal?: number;
-};
-
-const MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 /** Whether any OCR provider is reachable on this deployment. */
 export function visionConfigured() {
@@ -129,7 +122,7 @@ export async function extractFromImage(
         type: "image" as const,
         source: {
           type: "base64" as const,
-          media_type: (MEDIA_TYPES.has(mimeType) ? mimeType : "image/jpeg") as
+          media_type: (IMAGE_MEDIA_TYPES.has(mimeType) ? mimeType : "image/jpeg") as
             | "image/jpeg"
             | "image/png"
             | "image/webp"
@@ -143,7 +136,7 @@ export async function extractFromImage(
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 16000,
-      system: SYSTEM,
+      system: OCR_SYSTEM_PROMPT,
       thinking: { type: "adaptive" },
       output_config: { format: { type: "json_schema", schema: EXTRACTION_SCHEMA } },
       messages: [
@@ -151,10 +144,7 @@ export async function extractFromImage(
           role: "user",
           content: [
             source,
-            {
-              type: "text",
-              text: "Extract every billed line item from this document, along with the vendor, GSTIN, document number, GST rate, document title, exclusions, and the document's printed Subtotal and Grand Total if visible. The subtotal and grand total are the figures printed near the bottom of the document (e.g. Subtotal, Taxable Amount, Grand Total, Total Payable, Net Amount Payable) — NOT the sum of the line items.",
-            },
+            { type: "text", text: OCR_USER_PROMPT },
           ],
         },
       ],
@@ -190,48 +180,9 @@ export async function extractFromImage(
     throw new Error("OCR provider returned malformed output.");
   }
 
-  const lines: ExtractedLine[] = payload.lines
-    .filter((line) => line.description?.trim() && line.quantity > 0 && line.rate >= 0)
-    .map((line, index) => {
-      // Same arithmetic check the text-layer parser applies: a row that does not
-      // reconcile is surfaced for review rather than trusted.
-      const expected = line.quantity * line.rate;
-      const drift = expected === 0 ? 1 : Math.abs(expected - line.amount) / Math.max(expected, 1);
-      const reconciles = drift <= 0.01;
-      const confident = line.legible && reconciles;
-
-      return {
-        srNo: index + 1,
-        description: line.description.trim(),
-        unit: (line.unit || "nos").toLowerCase().trim(),
-        quantity: line.quantity,
-        rate: line.rate,
-        amount: reconciles ? line.amount : Math.round(expected * 100) / 100,
-        confidence: {
-          description: line.legible ? 0.93 : 0.7,
-          quantity: confident ? 0.93 : 0.6,
-          // Never above the text-layer path: OCR is inherently less certain, so
-          // a clean scan still lands below a machine-readable PDF.
-          rate: confident ? 0.93 : 0.55,
-        },
-      };
-    });
-
-  return {
-    lines,
-    pageCount: 1,
-    vendor: payload.vendor?.trim() || undefined,
-    vendorGstin: payload.vendorGstin?.trim() || undefined,
-    documentNumber: payload.documentNumber?.trim() || undefined,
-    documentTitle: payload.documentTitle?.trim() || undefined,
-    taxPct: Number.isFinite(payload.taxPct) && payload.taxPct > 0 ? payload.taxPct : 18,
-    needsOcr: false,
-    documentSubtotal: Number.isFinite(payload.documentSubtotal ?? 0) && (payload.documentSubtotal ?? 0) > 0 ? payload.documentSubtotal : undefined,
-    documentTotal: Number.isFinite(payload.documentTotal ?? 0) && (payload.documentTotal ?? 0) > 0 ? payload.documentTotal : undefined,
-    // The vision path reads the page as an image, so there is no text layer to
-    // sample a script from; the model is prompted in English.
-    language: "English",
-    // The vision path never sees a text layer, so there is none to sample.
-    sampleText: lines.map((line) => line.description).join(" | ").slice(0, 600),
-  };
+  // Shared with the Gemini path: both providers answer the same schema, so the
+  // arithmetic check and the field mapping are applied in one place rather than
+  // drifting apart per provider — which is how this path came to silently drop
+  // the document title and exclusions it was asking for.
+  return toExtractionResult(payload, MODEL);
 }

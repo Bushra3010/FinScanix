@@ -180,10 +180,17 @@ model Invoice {
   language       String?
   /// Vendor-stated exclusions parsed from the document's terms / notes section.
   exclusions     Json?
+  /// Scope gaps and vague wording the model found in this specific document —
+  /// items a buyer would expect for this scope of work that the quotation does
+  /// not price, and phrases that are too loose to hold the vendor to. Null on
+  /// documents analysed before these were captured; the report then falls back
+  /// to a checklist derived from the document's own line items.
+  scopeGaps      Json?
+  ambiguities    Json?
   /// The document's own subtotal and grand total, read from the printed totals
-  /// rather than derived from line items. Used as the authoritative "Quoted Value"
-  /// on the report so rounding or extraction variance in line items cannot skew
-  /// the displayed total away from what the vendor actually charged.
+  /// rather than derived from line items. documentSubtotal is the authoritative
+  /// pre-tax "Quoted Value" on the report, so rounding or extraction variance in
+  /// line items cannot skew it; documentTotal is the tax-inclusive grand total.
   documentSubtotal Float?
   documentTotal    Float?
 

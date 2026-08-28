@@ -87,6 +87,15 @@ export interface ExtractionResult {
    */
   exclusions?: string[];
   /**
+   * Scope gaps and loose wording the vision model found in this document —
+   * items this scope of work would normally price but this one does not, and
+   * phrases too vague to hold the vendor to. Undefined on the text-layer path,
+   * which reads rows rather than reasoning about scope; the report then derives
+   * its own from the line items.
+   */
+  scopeGaps?: string[];
+  ambiguities?: string[];
+  /**
    * The reconstructed text, first few hundred characters. Surfaced when no rows
    * are found so the failure can be diagnosed from the report rather than
    * guessed at.
