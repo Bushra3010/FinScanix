@@ -131,11 +131,13 @@ export async function ensureScopeAnalysis(invoiceId: string): Promise<ModelScope
   });
   if (!row) return null;
 
-  if (Array.isArray(row.scopeGaps) || Array.isArray(row.ambiguities)) {
-    return {
-      gaps: Array.isArray(row.scopeGaps) ? (row.scopeGaps as string[]) : [],
-      ambiguities: Array.isArray(row.ambiguities) ? (row.ambiguities as string[]) : [],
-    };
+  // Each side is judged on its own. OCR often answers one and not the other —
+  // an ambiguity read off a line item but no scope gaps — and treating "either
+  // one present" as answered would leave the other permanently empty.
+  const storedGaps = Array.isArray(row.scopeGaps) ? (row.scopeGaps as string[]) : null;
+  const storedAmbiguities = Array.isArray(row.ambiguities) ? (row.ambiguities as string[]) : null;
+  if (storedGaps && storedAmbiguities) {
+    return { gaps: storedGaps, ambiguities: storedAmbiguities };
   }
 
   const analysis = await generateScopeAnalysis({
@@ -144,11 +146,18 @@ export async function ensureScopeAnalysis(invoiceId: string): Promise<ModelScope
     lines: row.lineItems,
     exclusions: Array.isArray(row.exclusions) ? (row.exclusions as string[]) : [],
   });
-  if (!analysis) return null;
+  if (!analysis) return storedGaps || storedAmbiguities
+    ? { gaps: storedGaps ?? [], ambiguities: storedAmbiguities ?? [] }
+    : null;
 
+  // What the page read wins over what the line items imply — it saw the wording.
+  const merged = {
+    gaps: storedGaps ?? analysis.gaps,
+    ambiguities: storedAmbiguities ?? analysis.ambiguities,
+  };
   await prisma.invoice.update({
     where: { id: invoiceId },
-    data: { scopeGaps: analysis.gaps, ambiguities: analysis.ambiguities },
+    data: { scopeGaps: merged.gaps, ambiguities: merged.ambiguities },
   });
-  return analysis;
+  return merged;
 }
