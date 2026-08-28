@@ -5,9 +5,11 @@ import {
   IMAGE_MEDIA_TYPES,
   OCR_SYSTEM_PROMPT,
   OCR_USER_PROMPT,
+  toCommercialTerms,
   toExtractionResult,
   type VisionPayload,
 } from "./vision-shared";
+import type { CommercialTerms } from "@/lib/commercial-terms";
 
 /**
  * OCR through Google AI Studio (Gemini).
@@ -64,6 +66,20 @@ const EXTRACTION_SCHEMA = {
       description: "Items the vendor explicitly stated as NOT included — from an Exclusions, Scope Exclusions, Not Included, or Terms section. Empty array if no exclusions are stated.",
       items: { type: Type.STRING },
     },
+    commercialTerms: {
+      type: Type.OBJECT,
+      description: "What the document's Terms and Conditions block states, copied in the vendor's own words. Empty string for any term the document does not state.",
+      properties: {
+        payment: { type: Type.STRING, description: "Payment schedule, e.g. '50% advance, 40% on delivery, 10% after commissioning'" },
+        taxes: { type: Type.STRING, description: "Tax basis, e.g. 'GST as applicable'" },
+        validity: { type: Type.STRING, description: "How long the quoted price holds, e.g. 'valid for 30 days'" },
+        delivery: { type: Type.STRING, description: "Delivery lead time, e.g. '5-7 weeks from PO receipt'" },
+        warranty: { type: Type.STRING, description: "Warranty or defect liability period" },
+        other: { type: Type.ARRAY, description: "Any other stated term worth keeping", items: { type: Type.STRING } },
+      },
+      required: ["payment", "taxes", "validity", "delivery", "warranty", "other"],
+      propertyOrdering: ["payment", "taxes", "validity", "delivery", "warranty", "other"],
+    },
     scopeGaps: {
       type: Type.ARRAY,
       description: "Up to 5 items a buyer would expect to be priced for this particular scope of work, but which this document neither prices nor excludes. Judge against the trade the document is for. Empty array if the quotation is complete.",
@@ -83,12 +99,67 @@ const EXTRACTION_SCHEMA = {
       description: "The printed grand total (amount including all taxes) in rupees, if visible on the document. Return 0 if not visible.",
     },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
+  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
 };
 
 export function geminiConfigured() {
   return Boolean(process.env.GOOGLE_AI_API_KEY);
+}
+
+/** Just the terms block — for documents read before these were captured. */
+const TERMS_SCHEMA = {
+  type: Type.OBJECT,
+  properties: EXTRACTION_SCHEMA.properties.commercialTerms.properties,
+  required: EXTRACTION_SCHEMA.properties.commercialTerms.required,
+  propertyOrdering: EXTRACTION_SCHEMA.properties.commercialTerms.propertyOrdering,
+};
+
+/**
+ * Re-reads only the Terms and Conditions from a stored original.
+ *
+ * A document analysed before terms were captured cannot have them recovered
+ * from its line items — they are printed in their own block — so the page has
+ * to be read again. Asking for the terms alone keeps that to a fraction of a
+ * full re-extraction.
+ */
+export async function extractTermsWithGemini(
+  bytes: Uint8Array,
+  mimeType: string,
+): Promise<CommercialTerms | undefined> {
+  if (!geminiConfigured()) return undefined;
+
+  const declared = mimeType === "application/pdf"
+    ? "application/pdf"
+    : IMAGE_MEDIA_TYPES.has(mimeType)
+      ? mimeType
+      : "image/jpeg";
+
+  const result = await withGeminiRetry(() =>
+    geminiClient().models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user" as const,
+          parts: [
+            { inlineData: { mimeType: declared, data: Buffer.from(bytes).toString("base64") } },
+            {
+              text: "Read only this document's Terms and Conditions / Payment Terms / Notes block and return what it states, in the vendor's own words. Use an empty string for any term the document does not state.",
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: OCR_SYSTEM_PROMPT,
+        responseMimeType: "application/json",
+        responseSchema: TERMS_SCHEMA,
+      },
+    }),
+  );
+
+  const text = result.text ?? "";
+  if (!text.trim()) return undefined;
+  return toCommercialTerms(JSON.parse(text));
 }
 
 export async function extractWithGemini(

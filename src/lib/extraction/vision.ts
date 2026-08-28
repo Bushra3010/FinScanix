@@ -59,6 +59,20 @@ const EXTRACTION_SCHEMA = {
       description: "Items the vendor explicitly stated as NOT included, from an Exclusions, Scope Exclusions, Not Included or Terms section. Empty array if none are stated.",
       items: { type: "string" },
     },
+    commercialTerms: {
+      type: "object",
+      description: "What the document's Terms and Conditions block states, in the vendor's own words. Empty string for any term the document does not state.",
+      properties: {
+        payment: { type: "string", description: "Payment schedule, e.g. '50% advance, 40% on delivery, 10% after commissioning'" },
+        taxes: { type: "string", description: "Tax basis, e.g. 'GST as applicable'" },
+        validity: { type: "string", description: "How long the quoted price holds" },
+        delivery: { type: "string", description: "Delivery lead time" },
+        warranty: { type: "string", description: "Warranty or defect liability period" },
+        other: { type: "array", description: "Any other stated term worth keeping", items: { type: "string" } },
+      },
+      required: ["payment", "taxes", "validity", "delivery", "warranty", "other"],
+      additionalProperties: false,
+    },
     scopeGaps: {
       type: "array",
       description: "Up to 5 items a buyer would expect to be priced for this particular scope of work, but which this document neither prices nor excludes. Empty array if the quotation is complete.",

@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./client";
 import { analyseLines, summarise } from "@/lib/variance";
+import type { CommercialTerms } from "@/lib/commercial-terms";
 import type {
   ActivityEvent,
   AnalysedInvoice,
@@ -171,6 +172,10 @@ function toInvoice(row: InvoiceRow): Invoice {
     exclusions: Array.isArray(row.exclusions) ? (row.exclusions as string[]) : undefined,
     scopeGaps: Array.isArray(row.scopeGaps) ? (row.scopeGaps as string[]) : undefined,
     ambiguities: Array.isArray(row.ambiguities) ? (row.ambiguities as string[]) : undefined,
+    commercialTerms:
+      row.commercialTerms && typeof row.commercialTerms === "object" && !Array.isArray(row.commercialTerms)
+        ? (row.commercialTerms as CommercialTerms)
+        : undefined,
     quality: toQualityReport(row),
     // Totals are derived, never stored — the line items are the only source of
     // truth, so a corrected line can never leave a stale total behind.

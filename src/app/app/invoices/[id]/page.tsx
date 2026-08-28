@@ -25,6 +25,7 @@ import { requireUser } from "@/lib/auth/guard";
 import { deleteInvoiceAction } from "@/lib/invoices/actions";
 import { getInvoice, listCities } from "@/lib/db/queries";
 import { ensureScopeAnalysis } from "@/lib/pipeline/scope-analysis";
+import { ensureCommercialTerms } from "@/lib/pipeline/commercial-terms";
 import type { AnalysedInvoice } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -124,12 +125,19 @@ export default async function InvoiceDetailPage({
   // Documents analysed before scope gaps were captured have none stored. Read
   // them from the line items on first view and keep the result, so Section B is
   // about this document rather than a checklist every quotation would fail.
-  if (!processing && !rejected && !invoice.scopeGaps && !invoice.ambiguities) {
+  if (!processing && !rejected && (!invoice.scopeGaps || !invoice.ambiguities)) {
     const analysis = await ensureScopeAnalysis(invoice.id);
     if (analysis) {
       invoice.scopeGaps = analysis.gaps;
       invoice.ambiguities = analysis.ambiguities;
     }
+  }
+
+  // The terms block is printed on the page rather than derived from the rows,
+  // so an older document needs its stored original read once more.
+  if (!processing && !rejected && !invoice.commercialTerms) {
+    const terms = await ensureCommercialTerms(invoice.id);
+    if (terms) invoice.commercialTerms = terms;
   }
 
   /* Audit score is only meaningful once analysis is complete */

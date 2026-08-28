@@ -187,6 +187,10 @@ model Invoice {
   /// to a checklist derived from the document's own line items.
   scopeGaps      Json?
   ambiguities    Json?
+  /// Payment schedule, tax basis, validity and delivery lead time, read from
+  /// the document's Terms and Conditions block. Null when the document states
+  /// none, or it was analysed before these were captured.
+  commercialTerms Json?
   /// The document's own subtotal and grand total, read from the printed totals
   /// rather than derived from line items. documentSubtotal is the authoritative
   /// pre-tax "Quoted Value" on the report, so rounding or extraction variance in

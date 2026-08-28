@@ -1,4 +1,5 @@
 import { extractText, getDocumentProxy } from "unpdf";
+import type { CommercialTerms } from "@/lib/commercial-terms";
 
 /**
  * Line-item extraction from machine-generated PDFs — FR-2.1 / FR-2.2.
@@ -95,6 +96,8 @@ export interface ExtractionResult {
    */
   scopeGaps?: string[];
   ambiguities?: string[];
+  /** Payment, tax, validity and delivery terms read from the terms block. */
+  commercialTerms?: CommercialTerms;
   /**
    * The reconstructed text, first few hundred characters. Surfaced when no rows
    * are found so the failure can be diagnosed from the report rather than

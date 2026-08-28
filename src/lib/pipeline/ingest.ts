@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { services } from "@/lib/adapters";
 import { extractFromPdf, type ExtractedLine } from "@/lib/extraction/pdf";
@@ -347,6 +348,10 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       ambiguities: extracted?.ambiguities && extracted.ambiguities.length > 0
         ? extracted.ambiguities
         : undefined,
+      // Payment schedule, tax basis, validity and lead time, read off the
+      // document's terms block — the commercial exposure a buyer compares
+      // alongside the rates.
+      commercialTerms: (extracted?.commercialTerms ?? undefined) as Prisma.InputJsonObject | undefined,
       qualityChecks: {
         create: checks.map((check, position) => ({
           key: check.id,

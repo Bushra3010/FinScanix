@@ -6,6 +6,10 @@
  * screens keep consuming these shapes.
  */
 
+import type { CommercialTerms } from "@/lib/commercial-terms";
+
+export type { CommercialTerms };
+
 export type VarianceFlag = "over" | "under" | "par";
 
 export type Role = "owner" | "admin" | "estimator" | "auditor" | "viewer";
@@ -205,6 +209,9 @@ export interface Invoice {
   /** Wording in this document too loose to hold the vendor to. Undefined on the
    *  same terms as {@link scopeGaps}. */
   ambiguities?: string[];
+  /** Payment schedule, tax basis, validity and lead time, as the document
+   *  states them. Undefined when it states none. */
+  commercialTerms?: CommercialTerms;
   quality: QualityReport;
   subtotal: number;
   taxPct: number;
