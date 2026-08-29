@@ -17,9 +17,28 @@ import type {
 export const VARIANCE_CONFIG = {
   /** Within ±this % of the benchmark an item is considered fairly priced. */
   parBandPct: 7,
-  /** Weighting when both reference sources are available. */
-  sorWeight: 0.6,
-  marketWeight: 0.4,
+  /**
+   * Weighting when both reference sources are available.
+   *
+   * The market leads. A published schedule of rates — PWD SSR, MJP CSR, DSR —
+   * is revised on its own cycle and carries the input costs of whenever it was
+   * compiled, so it lags a live market and lags it downward. Benchmarking a
+   * current quotation mostly against a stale schedule understates the fair
+   * price and reads honest quotations as over-priced.
+   *
+   * The schedule is not dropped, because it is the auditable half: it is a
+   * published figure with a code behind it, where the market side is an
+   * estimate. It anchors the estimate rather than setting the answer.
+   */
+  sorWeight: 0.35,
+  marketWeight: 0.65,
+  /**
+   * Beyond this ratio between the two sources, they are not measuring the same
+   * thing — a rate-book line matched by wording alone, or a market estimate
+   * that landed on the wrong product. Blending them still gives a number, so
+   * the divergence is taken out of the verdict's confidence instead.
+   */
+  sourceDivergenceRatio: 2,
 } as const;
 
 export function median(values: number[]): number | undefined {
@@ -33,6 +52,21 @@ export function classify(variancePct: number, band = VARIANCE_CONFIG.parBandPct)
   if (variancePct > band) return "over";
   if (variancePct < -band) return "under";
   return "par";
+}
+
+/**
+ * How much the two reference sources agreeing is worth to the verdict.
+ *
+ * 1 while they are within the tolerated ratio, then falling away as they
+ * separate, to a floor of 0.4 — a benchmark built from two sources that
+ * contradict each other is still the best available answer, just not one to
+ * act on without reading the line.
+ */
+function divergencePenalty(sorRate: number, marketMedian: number): number {
+  if (sorRate <= 0 || marketMedian <= 0) return 1;
+  const ratio = Math.max(sorRate, marketMedian) / Math.min(sorRate, marketMedian);
+  if (ratio <= VARIANCE_CONFIG.sourceDivergenceRatio) return 1;
+  return Math.max(0.4, VARIANCE_CONFIG.sourceDivergenceRatio / ratio);
 }
 
 export function evaluateLine(item: LineItem): LineVariance {
@@ -75,12 +109,23 @@ export function evaluateLine(item: LineItem): LineVariance {
   // corroborate it, and how confident OCR was about the rate we read.
   const matchScore = item.sorMatch?.matchScore ?? 0;
   const quoteCoverage = Math.min(item.marketQuotes.length / 3, 1);
-  const sourceConfidence =
+  const baseConfidence =
     benchmarkBasis === "sor+market"
       ? 0.55 * matchScore + 0.45 * quoteCoverage
       : benchmarkBasis === "sor"
         ? 0.75 * matchScore
         : 0.7 * quoteCoverage;
+
+  // Two sources far apart are evidence against each other. Measured across the
+  // rate book, market estimates land anywhere from 0.14x to 2.98x of the
+  // schedule — usually because the estimate found the wrong product or the
+  // match caught the wrong line — and now that the market carries most of the
+  // weight, a wrong estimate moves the benchmark further than it used to. The
+  // verdict is still reported, but it stops claiming to be certain.
+  const sourceConfidence =
+    benchmarkBasis === "sor+market" && sorRate != null && marketMedian != null
+      ? baseConfidence * divergencePenalty(sorRate, marketMedian)
+      : baseConfidence;
 
   return {
     marketMedian,
