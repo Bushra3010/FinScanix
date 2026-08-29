@@ -118,9 +118,7 @@ async function buildWorkbook(invoice: AnalysedInvoice, orgName: string) {
     ["", ""],
     [
       "Method",
-      `Benchmark = ${Math.round(VARIANCE_CONFIG.sorWeight * 100)}% location-adjusted SoR + ${Math.round(
-        VARIANCE_CONFIG.marketWeight * 100,
-      )}% median market quote. Par band ±${VARIANCE_CONFIG.parBandPct}%.`,
+      `Benchmark = median market quote, location-adjusted; Schedule of Rates carried as a cross-check. Par band ±${VARIANCE_CONFIG.parBandPct}%.`,
     ],
   ]);
   summary.getRow(1).font = { bold: true, size: 14 };
@@ -312,8 +310,9 @@ function buildPdf(invoice: AnalysedInvoice, orgName: string): Promise<Buffer> {
     doc.moveDown(1);
     doc.fontSize(7.5).fillColor("#666");
     doc.text(
-      `Method: benchmark = ${Math.round(VARIANCE_CONFIG.sorWeight * 100)}% location-adjusted Schedule of Rates + ` +
-        `${Math.round(VARIANCE_CONFIG.marketWeight * 100)}% median market quote where both exist. ` +
+      `Method: benchmark = the median live market quote, location-adjusted. A published Schedule of Rates ` +
+        `lags the market it prices, so where one matches the line it is carried as a cross-check rather than ` +
+        `as part of the figure, and a disagreement beyond ${VARIANCE_CONFIG.sourceDivergenceRatio}x lowers the reported confidence. ` +
         `Items within ±${VARIANCE_CONFIG.parBandPct}% of benchmark are reported at par. ` +
         `The engine is deterministic: the same inputs reproduce this report exactly. ` +
         `Advisory decision-support, not a legally binding valuation.`,

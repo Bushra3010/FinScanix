@@ -35,7 +35,7 @@ const resources = [
   {
     icon: Gauge,
     title: "Variance method",
-    body: `Benchmark blends ${Math.round(VARIANCE_CONFIG.sorWeight * 100)}% location-adjusted SoR with ${Math.round(VARIANCE_CONFIG.marketWeight * 100)}% median market price. Items within ±${VARIANCE_CONFIG.parBandPct}% are at par.`,
+    body: `Benchmark = median live market price, location-adjusted, cross-checked against the Schedule of Rates where it matches. Items within ±${VARIANCE_CONFIG.parBandPct}% are at par.`,
     href: "/#features",
     cta: "Read the method",
   },

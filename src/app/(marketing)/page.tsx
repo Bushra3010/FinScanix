@@ -343,14 +343,14 @@ export default function LandingPage() {
                 The verdict
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-foreground">
-                One benchmark, built from two independent sources.
+                One benchmark, checked against two independent sources.
               </h2>
               <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
-                A government rate book alone lags the market. A market price alone has no
-                standing in an audit. FinScanix blends both — weighted{" "}
-                {Math.round(VARIANCE_CONFIG.sorWeight * 100)}% to the location-adjusted SoR
-                rate and {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% to the median live
-                quote — then judges the billed rate against that blend.
+                A government rate book is revised on its own cycle and lags the market it is
+                meant to price. So the billed rate is judged against the median live market
+                quote, location-adjusted — and where the rate book also matches the line, it
+                is carried as a cross-check: the further the two disagree, the lower the
+                confidence reported with the verdict.
               </p>
 
               <ul className="mt-6 space-y-3">

@@ -1516,10 +1516,8 @@ export function InvoiceReport({
             </span>
           )}
           <span className="text-[11.5px] text-muted-foreground">
-            Market column = benchmark unit rate ·{" "}
-            {Math.round(VARIANCE_CONFIG.sorWeight * 100)}% SoR +{" "}
-            {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% market median ·
-            par band ±{VARIANCE_CONFIG.parBandPct}%
+            Market column = benchmark unit rate · median market quote,
+            SoR cross-checked · par band ±{VARIANCE_CONFIG.parBandPct}%
           </span>
         </div>
 
@@ -2392,13 +2390,19 @@ function Evidence({ line }: { line: ReturnType<typeof analyseLines>[number] }) {
           <p className="tnum mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
             {variance.benchmarkBasis === "sor+market" ? (
               <>
-                Benchmark = {Math.round(VARIANCE_CONFIG.sorWeight * 100)}% ×{" "}
-                {formatINR(line.sorMatch!.adjustedRate)} (SoR){" + "}
-                {Math.round(VARIANCE_CONFIG.marketWeight * 100)}% ×{" "}
-                {formatINR(variance.marketMedian ?? 0)} (market median) ={" "}
+                Benchmark = median market quote{" "}
                 <span className="font-medium text-foreground">
                   {formatINR(variance.benchmarkRate)}
                 </span>
+                {" · cross-checked against SoR "}
+                {formatINR(line.sorMatch!.adjustedRate)}
+                {" ("}
+                {(() => {
+                  const sor = line.sorMatch!.adjustedRate;
+                  const gap = sor > 0 ? ((variance.benchmarkRate - sor) / sor) * 100 : 0;
+                  return `${gap > 0 ? "+" : ""}${gap.toFixed(0)}%`;
+                })()}
+                {")"}
               </>
             ) : variance.benchmarkBasis === "sor" ? (
               <>

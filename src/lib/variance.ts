@@ -18,25 +18,11 @@ export const VARIANCE_CONFIG = {
   /** Within ±this % of the benchmark an item is considered fairly priced. */
   parBandPct: 7,
   /**
-   * Weighting when both reference sources are available.
-   *
-   * The market leads. A published schedule of rates — PWD SSR, MJP CSR, DSR —
-   * is revised on its own cycle and carries the input costs of whenever it was
-   * compiled, so it lags a live market and lags it downward. Benchmarking a
-   * current quotation mostly against a stale schedule understates the fair
-   * price and reads honest quotations as over-priced.
-   *
-   * The schedule is not dropped, because it is the auditable half: it is a
-   * published figure with a code behind it, where the market side is an
-   * estimate. It anchors the estimate rather than setting the answer.
-   */
-  sorWeight: 0.35,
-  marketWeight: 0.65,
-  /**
-   * Beyond this ratio between the two sources, they are not measuring the same
-   * thing — a rate-book line matched by wording alone, or a market estimate
-   * that landed on the wrong product. Blending them still gives a number, so
-   * the divergence is taken out of the verdict's confidence instead.
+   * Beyond this ratio between the market price and a matched schedule rate,
+   * the two are not measuring the same thing — a rate-book line matched by
+   * wording alone, or a market estimate that landed on the wrong product. The
+   * market figure is still the benchmark, so the disagreement is taken out of
+   * the verdict's confidence instead of the number.
    */
   sourceDivergenceRatio: 2,
 } as const;
@@ -55,12 +41,12 @@ export function classify(variancePct: number, band = VARIANCE_CONFIG.parBandPct)
 }
 
 /**
- * How much the two reference sources agreeing is worth to the verdict.
+ * How much a corroborating schedule rate is worth to the verdict.
  *
- * 1 while they are within the tolerated ratio, then falling away as they
- * separate, to a floor of 0.4 — a benchmark built from two sources that
- * contradict each other is still the best available answer, just not one to
- * act on without reading the line.
+ * 1 while the two are within the tolerated ratio, then falling away as they
+ * separate, to a floor of 0.4 — a market price the published schedule
+ * contradicts is still the best available answer, just not one to act on
+ * without reading the line.
  */
 function divergencePenalty(sorRate: number, marketMedian: number): number {
   if (sorRate <= 0 || marketMedian <= 0) return 1;
@@ -77,16 +63,22 @@ export function evaluateLine(item: LineItem): LineVariance {
   let benchmarkRate = 0;
   let benchmarkBasis: LineVariance["benchmarkBasis"] = "none";
 
-  if (sorRate != null && marketMedian != null) {
-    benchmarkRate =
-      sorRate * VARIANCE_CONFIG.sorWeight + marketMedian * VARIANCE_CONFIG.marketWeight;
-    benchmarkBasis = "sor+market";
+  // The live market price is the benchmark wherever one exists. A published
+  // schedule — PWD SSR, MJP CSR, DSR — is revised on its own cycle and carries
+  // the input costs of whenever it was compiled, so it lags a live market and
+  // lags it downward; blending it in pulled the benchmark under the current
+  // price and read honest quotations as over-priced.
+  //
+  // A schedule match alongside it is kept as corroboration rather than as part
+  // of the figure: it is what the verdict's confidence is checked against, and
+  // it still serves as the benchmark on its own where no market quote came
+  // back at all.
+  if (marketMedian != null) {
+    benchmarkRate = marketMedian;
+    benchmarkBasis = sorRate != null ? "sor+market" : "market";
   } else if (sorRate != null) {
     benchmarkRate = sorRate;
     benchmarkBasis = "sor";
-  } else if (marketMedian != null) {
-    benchmarkRate = marketMedian;
-    benchmarkBasis = "market";
   }
 
   if (benchmarkBasis === "none") {
@@ -116,12 +108,12 @@ export function evaluateLine(item: LineItem): LineVariance {
         ? 0.75 * matchScore
         : 0.7 * quoteCoverage;
 
-  // Two sources far apart are evidence against each other. Measured across the
-  // rate book, market estimates land anywhere from 0.14x to 2.98x of the
-  // schedule — usually because the estimate found the wrong product or the
-  // match caught the wrong line — and now that the market carries most of the
-  // weight, a wrong estimate moves the benchmark further than it used to. The
-  // verdict is still reported, but it stops claiming to be certain.
+  // Measured across the rate book, market estimates land anywhere from 0.14x
+  // to 2.98x of the schedule — usually because the estimate found the wrong
+  // product or the match caught the wrong line. With the market setting the
+  // benchmark outright, a wrong estimate is not damped by anything, so where a
+  // schedule rate exists to contradict it the verdict is still reported but
+  // stops claiming to be certain.
   const sourceConfidence =
     benchmarkBasis === "sor+market" && sorRate != null && marketMedian != null
       ? baseConfidence * divergencePenalty(sorRate, marketMedian)
