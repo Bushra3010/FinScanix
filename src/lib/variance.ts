@@ -25,6 +25,20 @@ export const VARIANCE_CONFIG = {
    * the verdict's confidence instead of the number.
    */
   sourceDivergenceRatio: 2,
+  /**
+   * How far an uncorroborated market estimate may sit from the billed rate
+   * before it is treated as a misread rather than a finding.
+   *
+   * On a handwritten estimate the model priced "7 Lainar" at 6,500 against a
+   * billed 360 — it cannot read the shorthand, so it guesses something
+   * expensive — and one such line pushed a 16.2K document to an 87.6K
+   * benchmark. Nothing distinguishes "the vendor is 18x over" from "the
+   * estimate found the wrong product" when the estimate stands alone, so the
+   * line is reported as unpriced instead of carrying a verdict built on it. A
+   * schedule rate that agrees with the estimate overrides this: corroborated,
+   * even an extreme variance is a finding.
+   */
+  implausibleMarketRatio: 4,
 } as const;
 
 export function median(values: number[]): number | undefined {
@@ -73,7 +87,14 @@ export function evaluateLine(item: LineItem): LineVariance {
   // of the figure: it is what the verdict's confidence is checked against, and
   // it still serves as the benchmark on its own where no market quote came
   // back at all.
-  if (marketMedian != null) {
+  const marketUsable =
+    marketMedian != null &&
+    (sorRate != null ||
+      item.rate <= 0 ||
+      Math.max(marketMedian, item.rate) / Math.min(marketMedian, item.rate) <=
+        VARIANCE_CONFIG.implausibleMarketRatio);
+
+  if (marketMedian != null && marketUsable) {
     benchmarkRate = marketMedian;
     benchmarkBasis = sorRate != null ? "sor+market" : "market";
   } else if (sorRate != null) {

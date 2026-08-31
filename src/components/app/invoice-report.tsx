@@ -1829,9 +1829,14 @@ export function InvoiceReport({
 
       {/* ── Pricing Details + Potential Savings (2-col) ── */}
       {(() => {
-        const calcTax           = netValue * (invoice.taxPct / 100);
-        const calcGrandTotal    = netValue + calcTax;          // boqValue
-        const discount          = Math.max(0, invoice.subtotal - netValue);
+        // The document's own discount and tax where it printed them. Deriving
+        // the discount as subtotal-minus-line-sum could only ever yield zero —
+        // both are the same sum — so a printed deduction was reported as ₹0 and
+        // the tax was re-invented at the header rate.
+        const discount          = invoice.documentDiscount ?? Math.max(0, invoice.subtotal - netValue);
+        const taxable           = netValue - discount;
+        const calcTax           = invoice.documentTax ?? taxable * (invoice.taxPct / 100);
+        const calcGrandTotal    = taxable + calcTax;           // boqValue
         const subtotalDiff      = invoice.subtotal - netValue; // +ve = vendor quoted more
         const grandTotalDiff    = invoice.total - calcGrandTotal;
         const TOLS              = 2;
@@ -2384,7 +2389,17 @@ function Evidence({ line }: { line: ReturnType<typeof analyseLines>[number] }) {
 
         {variance.benchmarkBasis === "none" ? (
           <p className="mt-2 text-[12.5px] text-muted-foreground">
-            No reference rate available from either source, so no verdict was issued.
+            {variance.marketMedian != null ? (
+              <>
+                The only reference found was a market estimate of{" "}
+                {formatINR(variance.marketMedian)} against a billed{" "}
+                {formatINR(line.rate)}. Nothing corroborates a gap that size, so it is
+                more likely the estimate matched the wrong item than that the rate is
+                wrong — no verdict was issued. Check this line by hand.
+              </>
+            ) : (
+              <>No reference rate available from either source, so no verdict was issued.</>
+            )}
           </p>
         ) : (
           <p className="tnum mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
