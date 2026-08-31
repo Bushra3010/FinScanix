@@ -85,6 +85,8 @@ const EXTRACTION_SCHEMA = {
     },
     documentSubtotal: { type: "number", description: "The printed subtotal (before tax) in rupees, if visible on the document" },
     documentTotal: { type: "number", description: "The printed grand total (including all taxes) in rupees, if visible on the document" },
+    documentDiscount: { type: "number", description: "The discount amount printed in the totals block (Less / Discount / Rebate), in rupees. 0 if absent." },
+    documentTax: { type: "number", description: "The tax or levy amount printed in the totals block, in rupees — the amount, not a percentage. 0 if absent." },
   },
   required: ["vendor", "vendorGstin", "documentNumber", "taxPct", "lines"],
   additionalProperties: false,

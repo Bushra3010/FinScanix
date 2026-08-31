@@ -367,6 +367,8 @@ export async function ingestDocument(input: IngestInput): Promise<IngestResult> 
       // what the vendor actually quoted.
       documentSubtotal: extracted?.documentSubtotal ?? null,
       documentTotal: extracted?.documentTotal ?? null,
+      documentDiscount: extracted?.documentDiscount ?? null,
+      documentTax: extracted?.documentTax ?? null,
     },
   });
 

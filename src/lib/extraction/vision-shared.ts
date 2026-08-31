@@ -22,6 +22,8 @@ For "documentTitle": look for a project or work title printed prominently on the
 
 For "exclusions": look for any "Exclusions", "Scope Exclusions", "Not included", or "Terms" section in the document. Return each exclusion as a short plain-text string. If none are stated, return an empty array.
 
+For "documentDiscount" and "documentTax": read the amounts printed in the totals block, not percentages and not anything you calculate. A discount may be written as "Less", "Discount", "Rebate" or a bare deduction; a tax line may be a GST amount or a flat levy under any label. Return 0 for either when the document does not print it. These have to reconcile: printed subtotal minus discount plus tax should equal the printed grand total, and if it does not, transcribe what is printed anyway rather than adjusting a figure to make it balance.
+
 For "commercialTerms": read the document's Terms and Conditions, Payment Terms, Commercial Terms or Notes block and return what it states, each field copied in the vendor's own words and left as an empty string when the document does not state it. "payment" is the payment schedule ("50% advance, 40% on delivery, 10% after commissioning"). "taxes" is the tax basis ("GST as applicable", "18% GST extra"). "validity" is how long the price holds ("valid for 30 days"). "delivery" is the lead time ("5-7 weeks from PO receipt"). "warranty" is the warranty or defect liability period. Put any other term worth keeping — penalties, site conditions, force majeure — in "other". Never infer a term that is not printed.
 
 For "scopeGaps": name the items a buyer would normally expect to be priced for THIS particular scope of work, but which this document does not price anywhere — neither in a line item nor in the terms. Judge against the trade the document is actually for: a chiller or HRU replacement raises different gaps (removal and disposal of the old unit, refrigerant handling, testing and commissioning, making good after installation) from a swimming-pool build (dewatering, waterproofing, filtration commissioning) or a housekeeping contract (consumables, supervisor deployment, statutory labour compliance). Return at most 5, each a short noun phrase. Do not list something the document already prices or already excludes, and do not pad the list — return an empty array when the quotation is complete.
@@ -29,7 +31,7 @@ For "scopeGaps": name the items a buyer would normally expect to be priced for T
 For "ambiguities": find the wording in this document that is too loose to hold the vendor to — unnamed makes or brands ("branded / equivalent", "approved make"), open quantities ("as required", "lump sum", "provisional"), undefined responsibility, or specifications deferred to a later decision. Write each entry as the item it applies to, an em dash, then what is left undefined — for example "Supply of 100 TR chiller — 'branded equivalent' names no make or model" or "Ducting modification — quantity left to site conditions". Never return the item description on its own: the reader can already see the line, and needs to be told what is wrong with it. Return at most 5, and an empty array when the document is specific throughout. Report only what is actually written — never invent a gap or an ambiguity to fill the list.`;
 
 export const OCR_USER_PROMPT =
-  "Extract every billed line item from this document, along with the vendor, GSTIN, document number, GST rate, document title, exclusions, commercial terms, scope gaps and ambiguities. Also return the document's printed Subtotal and Grand Total if visible — these are the totals printed on the document (usually near the bottom), NOT the sum of the line items.";
+  "Extract every billed line item from this document, along with the vendor, GSTIN, document number, GST rate, document title, exclusions, commercial terms, scope gaps and ambiguities. Also return the document's printed Subtotal, Discount, Tax and Grand Total if visible — these are the figures printed on the document (usually near the bottom), NOT anything derived from the line items.";
 
 export interface VisionLine {
   description: string;
@@ -65,6 +67,10 @@ export interface VisionPayload {
   documentSubtotal?: number;
   /** The document's own printed grand total, read from the totals section. */
   documentTotal?: number;
+  /** The discount amount printed in the totals block. */
+  documentDiscount?: number;
+  /** The tax amount printed in the totals block. */
+  documentTax?: number;
 }
 
 export const IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -166,6 +172,8 @@ export function toExtractionResult(payload: VisionPayload, provider: string): Ex
     commercialTerms,
     documentSubtotal: Number.isFinite(payload.documentSubtotal ?? 0) && (payload.documentSubtotal ?? 0) > 0 ? payload.documentSubtotal : undefined,
     documentTotal: Number.isFinite(payload.documentTotal ?? 0) && (payload.documentTotal ?? 0) > 0 ? payload.documentTotal : undefined,
+    documentDiscount: Number.isFinite(payload.documentDiscount ?? 0) && (payload.documentDiscount ?? 0) > 0 ? payload.documentDiscount : undefined,
+    documentTax: Number.isFinite(payload.documentTax ?? 0) && (payload.documentTax ?? 0) > 0 ? payload.documentTax : undefined,
     // The vision path reads the page as an image, so there is no text layer to
     // sample a script from; the model is prompted in English.
     language: "English",

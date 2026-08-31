@@ -82,6 +82,9 @@ export interface ExtractionResult {
    */
   documentSubtotal?: number;
   documentTotal?: number;
+  /** The discount and tax amounts printed in the totals block, where present. */
+  documentDiscount?: number;
+  documentTax?: number;
   /**
    * Items the vendor explicitly stated as excluded from scope, read from the
    * document's Exclusions / Terms section. Undefined when no such section was found.

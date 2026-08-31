@@ -224,6 +224,10 @@ export interface Invoice {
   /** The document's own printed grand total, including GST/VAT. Not the
    *  "Quoted Value" — that is reported pre-tax. Null if unreadable. */
   documentTotal?: number;
+  /** The discount and tax amounts the document prints in its totals block.
+   *  Undefined when it prints neither, or predates their capture. */
+  documentDiscount?: number;
+  documentTax?: number;
   lineItems: LineItem[];
 }
 

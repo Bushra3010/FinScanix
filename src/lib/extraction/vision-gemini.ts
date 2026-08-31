@@ -98,9 +98,17 @@ const EXTRACTION_SCHEMA = {
       type: Type.NUMBER,
       description: "The printed grand total (amount including all taxes) in rupees, if visible on the document. Return 0 if not visible.",
     },
+    documentDiscount: {
+      type: Type.NUMBER,
+      description: "The discount amount printed in the totals block (Less / Discount / Rebate), in rupees. Return 0 if the document does not print one.",
+    },
+    documentTax: {
+      type: Type.NUMBER,
+      description: "The tax or levy amount printed in the totals block, in rupees — the amount, not a percentage. Return 0 if the document does not print one.",
+    },
   },
-  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
-  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal"],
+  required: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal", "documentDiscount", "documentTax"],
+  propertyOrdering: ["vendor", "vendorGstin", "documentNumber", "documentTitle", "taxPct", "lines", "exclusions", "commercialTerms", "scopeGaps", "ambiguities", "documentSubtotal", "documentTotal", "documentDiscount", "documentTax"],
 };
 
 export function geminiConfigured() {

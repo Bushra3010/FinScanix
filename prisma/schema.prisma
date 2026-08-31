@@ -197,6 +197,11 @@ model Invoice {
   /// line items cannot skew it; documentTotal is the tax-inclusive grand total.
   documentSubtotal Float?
   documentTotal    Float?
+  /// The discount and tax the document itself prints, as amounts. A quotation
+  /// may carry a flat levy or a negotiated deduction that no percentage
+  /// reproduces, so these are read rather than derived from taxPct.
+  documentDiscount Float?
+  documentTax      Float?
 
   // Quality gate outcome — FR-1.2
   qualityPassed   Boolean

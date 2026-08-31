@@ -147,6 +147,37 @@ function toQualityReport(row: InvoiceRow): QualityReport {
   };
 }
 
+/** The taxable base a printed tax amount was charged on. */
+function taxableBase(row: InvoiceRow, subtotal: number): number {
+  return (row.documentSubtotal ?? subtotal) - (row.documentDiscount ?? 0);
+}
+
+/**
+ * The rate the document actually charged, where its own figures show one.
+ *
+ * taxPct is read off the header and is often a default rather than an
+ * observation. A printed tax amount is the observation, so it wins.
+ */
+function effectiveTaxPct(row: InvoiceRow, subtotal: number): number {
+  const base = taxableBase(row, subtotal);
+  if (row.documentTax == null || base <= 0) return row.taxPct;
+  return Math.round((row.documentTax / base) * 10000) / 100;
+}
+
+/**
+ * The grand total, preferring what the document printed.
+ *
+ * Falls back to subtotal plus tax at the header rate only when the document
+ * printed no total of its own — where it did, that figure is the answer and
+ * any discount or levy inside it is already accounted for.
+ */
+function documentGrandTotal(row: InvoiceRow, subtotal: number): number {
+  if (row.documentTotal != null && row.documentTotal > 0) return round2(row.documentTotal);
+  const base = taxableBase(row, subtotal);
+  if (row.documentTax != null) return round2(base + row.documentTax);
+  return round2(subtotal * (1 + row.taxPct / 100));
+}
+
 function toInvoice(row: InvoiceRow): Invoice {
   const lineItems = row.lineItems.map(toLineItem);
   const subtotal = round2(lineItems.reduce((sum, line) => sum + line.amount, 0));
@@ -180,13 +211,20 @@ function toInvoice(row: InvoiceRow): Invoice {
     // Totals are derived, never stored — the line items are the only source of
     // truth, so a corrected line can never leave a stale total behind.
     subtotal,
-    taxPct: row.taxPct,
-    total: round2(subtotal * (1 + row.taxPct / 100)),
-    // The document's own printed totals, if they were read during extraction.
+    // A quotation is not obliged to apply a round percentage. This one deducts
+    // 750 and adds a 300 levy on a 16,205 subtotal, which no rate reproduces:
+    // applying the 18% default read off the header turned a printed 15,755 into
+    // 19,121 and reported that as the quoted grand total. So where the document
+    // prints the amounts, the effective rate is taken from them.
+    taxPct: effectiveTaxPct(row, subtotal),
+    total: documentGrandTotal(row, subtotal),
+    // The document's own printed figures, if they were read during extraction.
     // documentSubtotal is the authoritative source for the pre-tax "Quoted
     // Value" on the report; documentTotal is the tax-inclusive grand total.
     documentSubtotal: row.documentSubtotal ?? undefined,
     documentTotal: row.documentTotal ?? undefined,
+    documentDiscount: row.documentDiscount ?? undefined,
+    documentTax: row.documentTax ?? undefined,
     lineItems,
   };
 }
