@@ -29,8 +29,8 @@ const resources = [
     icon: MapPin,
     title: "City cost indices",
     body: `${CITIES.length} cities with CPWD-style factors, Delhi at 1.00 — Mumbai 1.18, Pune 1.11, Bengaluru 1.09, Jaipur 0.96.`,
-    href: "/#how-it-works",
-    cta: "See the pipeline",
+    href: "/#features",
+    cta: "See what it checks",
   },
   {
     icon: Gauge,

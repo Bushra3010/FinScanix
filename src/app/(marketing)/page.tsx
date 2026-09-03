@@ -4,32 +4,25 @@ import {
   ArrowRight,
   ArrowUp,
   Bot,
-  Check,
   CirclePlay,
   Clock,
   Database,
   Equal,
   FileSpreadsheet,
-  FileText,
   Gauge,
   HardHat,
   Lock,
   MapPin,
   RefreshCw,
-  ScanLine,
-  Search,
   ShieldCheck,
   Target,
-  TrendingUp,
   Users,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import { buttonStyles } from "@/components/ui/button";
-import { AppWindow } from "@/components/marketing/app-window";
 import { HeroIllustration } from "@/components/marketing/hero-illustration";
 import { getInvoice } from "@/lib/data/invoices";
-import { VARIANCE_CONFIG } from "@/lib/variance";
 import { cn, formatINR } from "@/lib/utils";
 
 /** The three assurances beside the hero CTAs. */
@@ -50,34 +43,6 @@ const sources: { name: string; kind: string }[] = [
 
 /** Sample invoice the hero figures are drawn from. */
 const sample = getInvoice("inv-0842");
-
-const steps = [
-  {
-    icon: FileText,
-    title: "Upload the bill",
-    body: "Drop in a vendor invoice or quotation as PDF or a phone photo. Bulk upload a whole month at once.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Quality gate",
-    body: "Blurred scans, cropped pages and files that aren't business documents are rejected up front — with a reason, and without spending your quota.",
-  },
-  {
-    icon: ScanLine,
-    title: "Extract line items",
-    body: "Descriptions, quantities, units, rates, amounts and totals are read out with per-field confidence. Anything uncertain is flagged for a quick correction.",
-  },
-  {
-    icon: Search,
-    title: "Benchmark twice",
-    body: "Every line is matched to a CPWD/State PWD Schedule of Rates entry, adjusted by your city's cost index, and cross-checked against live market prices.",
-  },
-  {
-    icon: TrendingUp,
-    title: "Get the variance report",
-    body: "Each item lands as over-priced, under-priced or at par, with the evidence attached and a roll-up of what's recoverable. Export to PDF or Excel.",
-  },
-];
 
 const features = [
   {
@@ -115,18 +80,18 @@ const features = [
 const painPoints = [
   {
     icon: Clock,
-    title: "Hours per bill",
-    body: "A reviewer types line items off a PDF, then opens a rate book, then opens a browser, then repeats — for every single item.",
+    title: "Hours lost per bill",
+    body: "Verifying a single item means jumping between PDFs, spreadsheets and browsers line by line. It's an exhausting, repetitive workflow that burns precious time.",
   },
   {
     icon: Users,
-    title: "No two reviewers agree",
-    body: "One estimator accepts a rate another would query. There is no shared definition of what 'fair' means for a given item in a given city.",
+    title: "Subjective approvals create compliance risks",
+    body: "Different team members apply different rules when evaluating quotes and rates. Without standardised data, your organisation loses control over market fairness and price accuracy.",
   },
   {
     icon: HardHat,
-    title: "Nothing to show for it",
-    body: "When a rate is challenged, the working is in someone's head or a spreadsheet nobody kept. There is no evidence trail to hand an auditor.",
+    title: "No clear trail of evidence",
+    body: "Manual reviews leave behind scattered notes and untracked emails. When auditors or stakeholders ask for justification, there is no centralised record to prove how a decision was made.",
   },
 ];
 
@@ -141,17 +106,17 @@ export default function LandingPage() {
           <div className="grid items-start gap-12 lg:grid-cols-[0.92fr_1.22fr] lg:gap-10">
             {/* Left column */}
             <div className="animate-fade-up">
-              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-[13.5px] font-medium text-brand shadow-card">
-                <HardHat className="h-4 w-4" />
-                Built for construction &amp; facilities procurement
+              <span className="inline-flex items-center gap-2.5 rounded-full border border-brand/20 bg-brand-soft px-4 py-2 text-[13.5px] font-semibold text-brand-soft-foreground">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-brand" aria-hidden />
+                AI-Powered Procurement Intelligence
               </span>
 
-              <h1 className="mt-7 text-[2.6rem] leading-[1.06] font-bold tracking-tight text-foreground sm:text-[3.1rem]">
+              <h1 className="mt-7 text-[3rem] leading-[1.02] font-bold tracking-[-0.035em] text-foreground sm:text-[3.6rem]">
                 <span className="block">Audit Every Invoice &amp; Quotation.</span>
                 <span className="block text-brand">Control Every Cost.</span>
               </h1>
 
-              <p className="mt-5 max-w-xl text-[16px] leading-relaxed text-muted-foreground">
+              <p className="mt-6 max-w-xl text-[18.5px] leading-[1.62] text-foreground/75">
                 FinScanix is an AI-powered procurement intelligence that analyzes vendor invoices
                 and quotations, benchmarks line items against government Schedule of Rates and live
                 local market pricing and flags overcharges to drive data-driven decision making,
@@ -171,7 +136,7 @@ export default function LandingPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
-                  href="/#how-it-works"
+                  href="/#features"
                   className={buttonStyles({
                     variant: "outline",
                     size: "lg",
@@ -179,7 +144,7 @@ export default function LandingPage() {
                   })}
                 >
                   <CirclePlay className="h-4.5 w-4.5 text-brand" />
-                  See how it works
+                  See what it checks
                 </Link>
               </div>
 
@@ -207,7 +172,22 @@ export default function LandingPage() {
 
             {/* Right column */}
             <div className="animate-fade-up">
-              <AppWindow />
+              {/*
+                Muted and inline are what make autoplay actually run: a browser
+                blocks an unmuted video from starting on its own, and iOS opens
+                a fullscreen player without playsInline. The frame matches the
+                product shot it replaces so the hero's proportions are unchanged.
+              */}
+              <video
+                className="w-full rounded-2xl border border-border bg-surface shadow-pop"
+                src="/hero.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                aria-label="FinScanix reviewing a vendor quotation"
+              />
 
               {/* Figures lifted out of the window, as in the design. */}
               <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -241,30 +221,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/*
-        The design placed customer logos here. Until there are named customers
-        who have agreed to be listed, this band shows the rate sources the
-        product actually benchmarks against — provenance rather than borrowed
-        credibility, and the stronger claim for this product anyway.
-      */}
-      <section className="border-y border-border bg-background">
-        <div className="mx-auto w-full max-w-7xl px-5 py-9 lg:px-8">
-          <p className="text-center text-[13.5px] text-muted-foreground">
-            Benchmarked against official rate books and live market sources
-          </p>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-10 gap-y-5">
-            {sources.map((source) => (
-              <div key={source.name} className="text-center">
-                <p className="text-[15px] font-semibold tracking-tight text-foreground/75">
-                  {source.name}
-                </p>
-                <p className="mt-0.5 text-[11.5px] text-muted-foreground">{source.kind}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Problem */}
       <section className="border-b border-border">
         <div className="mx-auto w-full max-w-7xl px-5 py-20 lg:px-8">
@@ -273,12 +229,12 @@ export default function LandingPage() {
               The problem
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-foreground">
-              Rate verification is still done by hand, one line at a time.
+              Unverified rates and scope quietly drain your budget.
             </h2>
             <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
-              Every organisation procuring construction materials and services receives more
-              bills than it can properly check. So most of them get a cursory look, and the
-              overcharges that matter hide in the middle of a 60-line BOQ.
+              Eyeballing quotes and scope changes creates expensive blind spots. Rushed
+              manual reviews allow hidden markups and unbudgeted work to pass through
+              unchecked, turning small oversight into compounding budget leaks.
             </p>
           </div>
 
@@ -291,128 +247,17 @@ export default function LandingPage() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-over-soft text-over">
                   <point.icon className="h-4.5 w-4.5" />
                 </div>
-                <h3 className="mt-4 text-[15px] font-semibold text-foreground">{point.title}</h3>
+                {/* Two lines are reserved so the bodies stay on a shared
+                    baseline: the titles differ enough in length that one wraps
+                    at tablet widths and the others do not. */}
+                <h3 className="mt-4 min-h-[2.875rem] text-[15px] font-semibold text-foreground">
+                  {point.title}
+                </h3>
                 <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
                   {point.body}
                 </p>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section id="how-it-works" className="scroll-mt-20 border-b border-border bg-surface">
-        <div className="mx-auto w-full max-w-7xl px-5 py-20 lg:px-8">
-          <div className="max-w-2xl">
-            <p className="text-[13px] font-semibold tracking-wide text-brand uppercase">
-              How it works
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-foreground">
-              Upload to defensible verdict in one pass.
-            </h2>
-          </div>
-
-          <ol className="mt-12 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2 lg:grid-cols-5">
-            {steps.map((step, i) => (
-              <li key={step.title} className="flex flex-col bg-surface p-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand">
-                    <step.icon className="h-4.5 w-4.5" />
-                  </div>
-                  <span className="tnum text-xs font-semibold text-muted-foreground">
-                    0{i + 1}
-                  </span>
-                </div>
-                <h3 className="mt-4 text-[14.5px] font-semibold text-foreground">{step.title}</h3>
-                <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-                  {step.body}
-                </p>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </section>
-
-      {/* Variance band explainer */}
-      <section className="border-b border-border">
-        <div className="mx-auto w-full max-w-7xl px-5 py-20 lg:px-8">
-          <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <p className="text-[13px] font-semibold tracking-wide text-brand uppercase">
-                The verdict
-              </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-foreground">
-                One benchmark, checked against two independent sources.
-              </h2>
-              <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
-                A government rate book is revised on its own cycle and lags the market it is
-                meant to price. So the billed rate is judged against the median live market
-                quote, location-adjusted — and where the rate book also matches the line, it
-                is carried as a cross-check: the further the two disagree, the lower the
-                confidence reported with the verdict.
-              </p>
-
-              <ul className="mt-6 space-y-3">
-                {[
-                  "Items within ±7% are at par — the band absorbs brand, batch and freight differences.",
-                  "Both source rates, the city index applied and every quote used stay attached to the line.",
-                  "Lines with no SoR match and no market quote are reported as unmatched, never guessed.",
-                ].map((point) => (
-                  <li key={point} className="flex gap-2.5 text-[13.5px] text-muted-foreground">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-par" />
-                    <span>{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-xl border border-border bg-surface p-6 shadow-card">
-              <p className="text-[13px] font-medium text-foreground">
-                Variance against benchmark
-              </p>
-
-              <div className="mt-6">
-                <div className="flex h-11 w-full overflow-hidden rounded-lg border border-border">
-                  <div className="flex flex-[3] items-center justify-center bg-under-soft text-[12.5px] font-medium text-under-foreground">
-                    Under-priced
-                  </div>
-                  <div className="flex flex-[2] items-center justify-center border-x border-border bg-par-soft text-[12.5px] font-medium text-par-foreground">
-                    At par
-                  </div>
-                  <div className="flex flex-[3] items-center justify-center bg-over-soft text-[12.5px] font-medium text-over-foreground">
-                    Over-priced
-                  </div>
-                </div>
-                <div className="tnum mt-2 flex justify-between text-[11.5px] text-muted-foreground">
-                  <span>−25%</span>
-                  <span>−7%</span>
-                  <span>+7%</span>
-                  <span>+25%</span>
-                </div>
-              </div>
-
-              <div className="mt-8 space-y-3">
-                <ExampleRow
-                  label="Vitrified tile flooring 600×600"
-                  detail="Billed ₹1,690 · benchmark ₹1,412"
-                  pct="+19.7%"
-                  tone="over"
-                />
-                <ExampleRow
-                  label="Interior acrylic emulsion, 2 coats"
-                  detail="Billed ₹151 · benchmark ₹147"
-                  pct="+2.7%"
-                  tone="par"
-                />
-                <ExampleRow
-                  label="Cement plaster 12 mm, CM 1:6"
-                  detail="Billed ₹225 · benchmark ₹252"
-                  pct="−10.9%"
-                  tone="under"
-                />
-              </div>
-            </div>
           </div>
         </div>
       </section>
@@ -491,6 +336,31 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/*
+        Provenance, kept to the end: the claim only means something once the
+        reader has seen what is being benchmarked and how. Where customer logos
+        would normally sit, this names the rate sources the product actually
+        reads — the stronger claim for this product, and an honest one while
+        there are no named customers who have agreed to be listed.
+      */}
+      <section className="border-t border-border bg-background">
+        <div className="mx-auto w-full max-w-7xl px-5 py-9 lg:px-8">
+          <p className="text-center text-[13.5px] text-muted-foreground">
+            Benchmarked against official rate books and live market sources
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-10 gap-y-5">
+            {sources.map((source) => (
+              <div key={source.name} className="text-center">
+                <p className="text-[15px] font-semibold tracking-tight text-foreground/75">
+                  {source.name}
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">{source.kind}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>

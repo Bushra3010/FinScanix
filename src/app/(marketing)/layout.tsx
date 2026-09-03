@@ -5,7 +5,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonStyles } from "@/components/ui/button";
 
 const navLinks = [
-  { href: "/#how-it-works", label: "How it works" },
   { href: "/#features", label: "Features" },
   { href: "/pricing", label: "Pricing" },
   { href: "/security", label: "Security" },
@@ -72,7 +71,6 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             <FooterCol
               title="Product"
               links={[
-                { href: "/#how-it-works", label: "How it works" },
                 { href: "/#features", label: "Features" },
                 { href: "/pricing", label: "Pricing" },
                 { href: "/resources", label: "Resources" },
