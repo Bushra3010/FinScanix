@@ -105,6 +105,14 @@ function DonutGauge({ score, level }: { score: number; level: RiskLevel }) {
  * Page
  * ------------------------------------------------------------------ */
 
+/**
+ * How long a report will wait for analysis that is only being backfilled.
+ *
+ * Long enough that a quick read still lands on the first view, short enough
+ * that a slow one never holds the page.
+ */
+const BACKFILL_BUDGET_MS = 2_500;
+
 export default async function InvoiceDetailPage({
   params,
 }: {
@@ -122,22 +130,48 @@ export default async function InvoiceDetailPage({
   const processing = invoice.status === "extracting" || invoice.status === "queued";
   const rejected = invoice.status === "rejected" || invoice.status === "failed";
 
-  // Documents analysed before scope gaps were captured have none stored. Read
-  // them from the line items on first view and keep the result, so Section B is
-  // about this document rather than a checklist every quotation would fail.
-  if (!processing && !rejected && (!invoice.scopeGaps || !invoice.ambiguities)) {
-    const analysis = await ensureScopeAnalysis(invoice.id);
-    if (analysis) {
-      invoice.scopeGaps = analysis.gaps;
-      invoice.ambiguities = analysis.ambiguities;
-    }
-  }
+  // Documents analysed before scope gaps and commercial terms were captured
+  // have neither stored, and both are read by a model — around three seconds
+  // for the scope, and another five for terms once the stored original has been
+  // downloaded. Awaited one after the other they sat in front of the render and
+  // made every such report feel broken.
+  //
+  // So they run together, and only for as long as a page load can afford. Past
+  // the deadline the report is served with what it has — Section B falls back
+  // to the derived checklist — while the work carries on and persists itself,
+  // so the next view has it. A backfill is not worth making anyone wait for.
+  if (!processing && !rejected) {
+    const pending: Promise<unknown>[] = [];
 
-  // The terms block is printed on the page rather than derived from the rows,
-  // so an older document needs its stored original read once more.
-  if (!processing && !rejected && !invoice.commercialTerms) {
-    const terms = await ensureCommercialTerms(invoice.id);
-    if (terms) invoice.commercialTerms = terms;
+    if (!invoice.scopeGaps || !invoice.ambiguities) {
+      pending.push(
+        ensureScopeAnalysis(invoice.id)
+          .then((analysis) => {
+            if (analysis) {
+              invoice.scopeGaps = analysis.gaps;
+              invoice.ambiguities = analysis.ambiguities;
+            }
+          })
+          .catch(() => {}),
+      );
+    }
+
+    if (!invoice.commercialTerms) {
+      pending.push(
+        ensureCommercialTerms(invoice.id)
+          .then((terms) => {
+            if (terms) invoice.commercialTerms = terms;
+          })
+          .catch(() => {}),
+      );
+    }
+
+    if (pending.length > 0) {
+      await Promise.race([
+        Promise.all(pending),
+        new Promise((resolve) => setTimeout(resolve, BACKFILL_BUDGET_MS)),
+      ]);
+    }
   }
 
   /* Audit score is only meaningful once analysis is complete */

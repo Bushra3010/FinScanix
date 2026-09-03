@@ -38,7 +38,21 @@ export async function ensureCommercialTerms(invoiceId: string): Promise<Commerci
   if (row.commercialTerms && typeof row.commercialTerms === "object" && !Array.isArray(row.commercialTerms)) {
     return row.commercialTerms as CommercialTerms;
   }
-  if (!row.storageKey || !geminiConfigured()) return null;
+  // No retained original means the terms can never be recovered — they are
+  // printed on a page nobody kept. Recording that closes the question; leaving
+  // it open had every view of those documents re-run the lookup and find the
+  // same nothing.
+  if (!row.storageKey) {
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { commercialTerms: {} },
+    });
+    return null;
+  }
+
+  // A missing key is a deployment condition, not a fact about the document, so
+  // that one is left open to be answered once the key is there.
+  if (!geminiConfigured()) return null;
 
   try {
     const url = await signedDocumentUrl(row.storageKey);
