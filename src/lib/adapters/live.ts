@@ -182,6 +182,24 @@ function minPriceFor(unit: string): number {
   return UNIT_MIN_PRICE[key] ?? UNIT_MIN_PRICE.default;
 }
 
+/**
+ * Units billed by measure rather than by the job or the piece.
+ *
+ * These are the ones a rate has to be built up for: the line is a composite of
+ * material, formwork, labour and overhead, and a single recalled number lands
+ * near the bare material cost.
+ */
+const MEASURED_UNITS = new Set([
+  "sqft", "sq ft", "sq.ft", "sft", "sqm", "sq m", "sq.m", "sqmt", "smt",
+  "cum", "cu m", "cu.m", "cft", "cu ft", "brass",
+  "rmt", "rm", "r.mt", "running metre", "running meter", "metre", "meter", "mtr", "m",
+  "kg", "quintal", "mt", "tonne", "ton",
+]);
+
+function isMeasuredUnit(unit: string): boolean {
+  return MEASURED_UNITS.has(unit.toLowerCase().trim());
+}
+
 function isServiceItem(description: string, unit: string): boolean {
   return SERVICE_UNITS.has(unit.toLowerCase().trim()) || SERVICE_KEYWORDS.test(description);
 }
@@ -289,9 +307,13 @@ async function serviceWebSearch(options: {
  */
 
 interface BaselineRate {
+  /** False when the description names nothing the model can recognise. */
+  identified?: boolean;
   low?: number;
   mid?: number;
   high?: number;
+  /** The component build-up the rate was derived from — kept for debugging. */
+  workings?: { component?: string; perUnit?: number }[];
 }
 
 const BASELINE_TTL_MS = 86_400_000;
@@ -341,10 +363,10 @@ async function geminiPricingEstimate(options: {
   fetchedAt: string;
   cityId: string;
   currency: string;
-}): Promise<MarketQuote[]> {
+}): Promise<MarketQuote[] | null> {
   const { description, unit, cityName, limit, fetchedAt, cityId, currency } = options;
 
-  if (!process.env.GOOGLE_AI_API_KEY) return [];
+  if (!process.env.GOOGLE_AI_API_KEY) return null;
 
   // The rate asked for is the national baseline, not the city rate. Asked per
   // city, the model answers within a couple of percent for Delhi and Bengaluru
@@ -353,6 +375,17 @@ async function geminiPricingEstimate(options: {
   // rate book moved with its index. Taking a national figure and applying the
   // same published index factor makes both halves move together, and makes the
   // difference between two cities explainable from a number the report shows.
+  // Only a measured unit gets the build-up. Asked to decompose a lump sum, the
+  // model has no scope to decompose against — the excavation on this pool went
+  // from 85,000 to 150,000 — so those keep the direct estimate.
+  const measured = isMeasuredUnit(unit);
+  const buildUp = measured
+    ? `Work the rate out before you state it. List what one unit actually consumes — each material at its delivered rate and quantity, then formwork, labour, plant and overhead — and let the components add up to the rate. A number produced this way is defensible; a number recalled whole tends to land near the bare material cost and understates the finished work by several times.\n\n`
+    : "";
+  const shape = measured
+    ? `"workings": [{"component": "<what it is>", "perUnit": <cost in ${currency} of this component in one unit>}], `
+    : "";
+
   const prompt = `You are a construction and facilities-management cost database for India (2024-2026 market rates).
 
 Provide the current all-India baseline market rate for this line item from a vendor quotation:
@@ -360,12 +393,17 @@ Provide the current all-India baseline market rate for this line item from a ven
 Description: "${description}"
 Unit of measure: ${unit}
 
+${buildUp}First decide whether the description identifies something you can actually price. A handwritten or shorthand line — "7 Lamiar", "3 Colour", "16.60 Pauna Pata", "6 x 4 - 2 6mm" — names no product, specification or trade you can recognise, and a rate invented for it is worse than none: it is reported to the buyer as a verdict on their vendor. If you cannot tell what the item is, set "identified" to false and return zero rates. Do not price a guess.
+
 Return ONLY valid JSON with this exact shape — no prose, no markdown:
-{"low": <20th-percentile rate in ${currency}>, "mid": <median rate in ${currency}>, "high": <80th-percentile rate in ${currency}>}
+{"identified": <true or false>, ${shape}"low": <20th-percentile rate in ${currency}>, "mid": <median rate in ${currency}>, "high": <80th-percentile rate in ${currency}>}
 
 Rules:
-- For supply items (Nos, each): give the typical wholesale/dealer price for the exact specification described.
+- For supply items (Nos, each, set): give the typical wholesale/dealer price for the exact specification described.
 - For service items (Job, LS, lot): give the total contract price for a single complete job including labour, tools, and overheads.
+- For measured units (sq ft, sqm, cum, cft, rmt, running metre, kg, quintal): give the FINISHED IN-PLACE composite rate a contractor bills per unit — material at delivered cost with wastage, plus reinforcement, formwork and shuttering, plus labour, plant, scaffolding, curing, site overhead and profit. This is not the price of the material on its own: the bare material is a fraction of the in-place rate, and quoting it makes an honest quotation look several times over-priced.
+- When a description lists several components ("base & walls, reinforcement, shuttering & concrete", "tiles incl. adhesive & grout", "waterproofing incl. protective screed"), the rate must cover every component named, executed and finished — not the cheapest one.
+- Price the work actually described. Structural work built to hold water — a pool shell, a tank, a retaining wall — is thicker, more heavily reinforced and more expensive per unit than an ordinary floor slab.
 - Give the national baseline, averaged across major Indian metros. Do NOT add a premium or discount for any particular city — the caller applies its own city cost index.
 - Return plain integers or decimals only (no currency symbols, no commas).`;
 
@@ -377,10 +415,16 @@ Rules:
     // moved the benchmark for reasons that had nothing to do with the city, and
     // two cities could not be compared at all.
     const parsed = await nationalBaseline(prompt, `${description}|${unit}|${currency}`);
-    if (!parsed) return [];
+    if (!parsed) return null;
+
+    // An unidentifiable line gets no quote at all. The alternative is what this
+    // replaced: "7 Lamiar" priced at 5,200 against a billed 360, and a
+    // handwritten estimate reporting thousands of rupees of recoverable
+    // savings that were entirely the model's guesswork.
+    if (parsed.identified === false) return [];
 
     const { low, mid, high } = parsed;
-    if (!mid || mid <= 0) return [];
+    if (!mid || mid <= 0) return null;
 
     // The published city cost index is what turns a national baseline into a
     // local one — the same factor the rate book is indexed by, so a line
@@ -449,7 +493,12 @@ export const serperPricingSearch: PricingSearchAdapter = {
           cityId,
           currency,
         });
-        if (geminiQuotes.length > 0) return geminiQuotes;
+        // An empty array is the model declining to price an item it cannot
+        // identify; null is the model being unavailable. Only the second is
+        // worth a fallback — asking a shopping search to guess what Gemini
+        // just refused to guess produces exactly the invented rate the
+        // decline exists to prevent.
+        if (geminiQuotes !== null) return geminiQuotes;
       } catch {
         // fall through to Serper
       }
@@ -480,6 +529,10 @@ export const serperPricingSearch: PricingSearchAdapter = {
       .filter((w) => w.length > 3)
       .slice(0, 8)
       .join(" ");
+    // Shorthand like "3 Colour" leaves nothing after the keyword filter, and
+    // Serper answers an empty query with a 400.
+    if (!query.trim()) return [];
+
     const suffix = isGcc ? " supplier wholesale" : "";
     const num = Math.max(limit * 3, 10);
 
